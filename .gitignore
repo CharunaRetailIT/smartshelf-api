@@ -55,3 +55,12 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Visual Studio / Rider IDE files
+.vs/
+.idea/
+*.csproj.user
+*.pubxml.user
+
+# Test results
+test-results/
