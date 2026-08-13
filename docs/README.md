@@ -5,7 +5,7 @@ Minew "ESL Cloud Platform Open API" document the client already works from.
 
 | File | Purpose |
 |---|---|
-| `SmartShelf-ESL-Open-API-V1.0.0.pdf` | The deliverable — 49 pages, A4 |
+| `SmartShelf-ESL-Open-API-V1.0.0.pdf` | The deliverable — 54 pages, A4 |
 | `spec.py` | All content, as plain data |
 | `build.py` | Renders `spec.py` into print-ready HTML |
 | `topdf.js` | Prints the HTML to PDF via headless Chrome |
@@ -45,6 +45,11 @@ Chrome applies a single margin box to a whole document, so a full-bleed cover an
 page-numbered body cannot coexist in one print pass. The cover is printed with
 zero margins and no footer, the body with margins and a running footer, and
 `pdfunite` joins them.
+
+Each document therefore declares its own `@page` rule inside `build.py` — the
+cover at `margin: 0`, the body at `20mm 24mm 22mm 24mm`. A CSS `@page` margin
+overrides the one passed to Puppeteer, so setting the page box in only one place
+silently flattens the other.
 
 ## Before sending to a client
 

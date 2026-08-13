@@ -10,7 +10,7 @@ const DIR = __dirname;
 const footer = `
   <style>
     #f { font-family: Helvetica, Arial, sans-serif; font-size: 7.5pt; color: #6b7671;
-         width: 100%; padding: 0 18mm; display: flex; justify-content: space-between;
+         width: 100%; padding: 0 24mm; display: flex; justify-content: space-between;
          border-top: 0.3pt solid #d3dcd7; padding-top: 3mm; }
     #f b { color: ${GREEN}; font-weight: 600; }
   </style>
@@ -46,7 +46,7 @@ const footer = `
     displayHeaderFooter: true,
     headerTemplate: '<div></div>',
     footerTemplate: footer,
-    margin: { top: '18mm', right: '18mm', bottom: '20mm', left: '18mm' },
+    preferCSSPageSize: true,
   });
 
   await browser.close();

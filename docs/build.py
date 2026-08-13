@@ -18,7 +18,7 @@ def code_block(text):
 
 
 CSS = """
-@page { size: A4; margin: 0; }
+@page { size: A4; }
 
 * { box-sizing: border-box; }
 
@@ -40,7 +40,7 @@ body {
   position: relative;
   background: GREEN;
   color: #fff;
-  padding: 32mm 24mm;
+  padding: 34mm 26mm;
 }
 .cover-plate {
   width: 24mm; height: 24mm; border-radius: 5mm; background: #fff;
@@ -67,7 +67,7 @@ body {
 .cover .sub { font-size: 11.5pt; line-height: 1.7; opacity: 0.95; max-width: 105mm; }
 .cover-foot {
   position: absolute;
-  left: 24mm; right: 24mm; bottom: 24mm;
+  left: 26mm; right: 26mm; bottom: 26mm;
   font-size: 9pt;
   opacity: 0.9;
   border-top: 0.3mm solid rgba(255,255,255,0.35);
@@ -82,15 +82,16 @@ body {
 .page-break { page-break-before: always; }
 
 h2.part {
-  font-size: 16pt;
+  font-size: 15.5pt;
   font-weight: 700;
-  color: GREEN;
+  color: #11150f;
+  letter-spacing: -0.15pt;
   margin: 0 0 1.5mm;
-  padding-bottom: 2.5mm;
-  border-bottom: 0.8mm solid GREEN;
+  padding-bottom: 3mm;
+  border-bottom: 0.7mm solid GREEN;
   page-break-after: avoid;
 }
-h2.part .num { font-weight: 400; opacity: 0.55; }
+h2.part .num { font-weight: 500; color: #7c8a83; }
 
 p.part-intro {
   margin: 4mm 0 7mm;
@@ -103,29 +104,32 @@ p.part-intro {
 h3.ep {
   font-size: 11.5pt;
   font-weight: 700;
-  color: #14261c;
-  margin: 9mm 0 3.5mm;
-  padding-left: 3mm;
-  border-left: 1mm solid GREEN;
+  color: #11150f;
+  letter-spacing: -0.1pt;
+  margin: 9.5mm 0 4mm;
+  padding-left: 3.5mm;
+  border-left: 1.1mm solid GREEN;
   page-break-after: avoid;
 }
-h3.ep .num { color: GREEN; font-weight: 700; margin-right: 1.5mm; }
+h3.ep .num { color: #11150f; font-weight: 700; margin-right: 2mm; }
 
 h4.sub {
-  font-size: 9.2pt;
+  font-size: 8.2pt;
   font-weight: 700;
-  color: GREEN;
+  color: #4a544e;
   text-transform: uppercase;
-  letter-spacing: 0.7pt;
-  margin: 6mm 0 2.5mm;
+  letter-spacing: 1.1pt;
+  margin: 6.5mm 0 2.5mm;
+  padding-bottom: 1.2mm;
+  border-bottom: 0.2mm solid #dde5e0;
   page-break-after: avoid;
 }
 
 h4.prose-h {
   font-size: 10pt;
   font-weight: 700;
-  color: #14261c;
-  margin: 6mm 0 1.5mm;
+  color: #11150f;
+  margin: 6.5mm 0 1.8mm;
   page-break-after: avoid;
 }
 
@@ -137,7 +141,7 @@ table {
   width: 100%;
   border-collapse: collapse;
   font-size: 8.8pt;
-  margin: 0 0 3mm;
+  margin: 0 0 3.5mm;
   page-break-inside: auto;
 }
 thead { display: table-header-group; }
@@ -147,13 +151,13 @@ th {
   color: #fff;
   font-weight: 600;
   text-align: left;
-  padding: 2.2mm 2.6mm;
+  padding: 2.4mm 3mm;
   border: 0.2mm solid GREEN;
   font-size: 8.4pt;
   letter-spacing: 0.2pt;
 }
 td {
-  padding: 2.2mm 2.6mm;
+  padding: 2.5mm 3mm;
   border: 0.2mm solid #d3dcd7;
   vertical-align: top;
   line-height: 1.5;
@@ -161,18 +165,18 @@ td {
 tbody tr:nth-child(even) td { background: #f4f8f5; }
 
 table.meta td:first-child {
-  width: 34mm;
+  width: 33mm;
   font-weight: 600;
-  background: #eef4f0;
-  color: #14261c;
+  background: #f2f6f3;
+  color: #11150f;
 }
 table.meta td { border-color: #d3dcd7; }
 
-table.params th:nth-child(1), table.params td:nth-child(1) { width: 30mm; }
+table.params th:nth-child(1), table.params td:nth-child(1) { width: 28mm; }
 table.params th:nth-child(2), table.params td:nth-child(2) { width: 15mm; }
-table.params th:nth-child(3), table.params td:nth-child(3) { width: 16mm; }
-table.params th:nth-child(4), table.params td:nth-child(4) { width: 15mm; }
-table.params th:nth-child(5), table.params td:nth-child(5) { width: 32mm; }
+table.params th:nth-child(3), table.params td:nth-child(3) { width: 14mm; }
+table.params th:nth-child(4), table.params td:nth-child(4) { width: 17mm; }
+table.params th:nth-child(5), table.params td:nth-child(5) { width: 29mm; }
 
 table.codes th:nth-child(1), table.codes td:nth-child(1) { width: 27mm; }
 
@@ -187,7 +191,7 @@ pre.code {
   border: 0.2mm solid #d3dcd7;
   border-left: 0.9mm solid GREEN;
   border-radius: 0.6mm;
-  padding: 3mm 3.5mm;
+  padding: 3.4mm 4mm;
   font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
   font-size: 8.1pt;
   line-height: 1.5;
@@ -243,25 +247,25 @@ th code, .verb code { background: none; color: inherit; }
 
 /* -------------------------------------------------------------------- toc */
 
-.toc { margin-top: 6mm; }
+.toc { margin-top: 5mm; }
 .toc-part {
   font-weight: 700;
-  color: #14261c;
-  margin: 4.5mm 0 1.5mm;
-  font-size: 10pt;
+  color: #11150f;
+  margin: 3.4mm 0 1.1mm;
+  font-size: 9.6pt;
 }
 .toc-item {
   display: flex;
-  font-size: 9.2pt;
+  font-size: 8.9pt;
   color: #3f4643;
-  margin-bottom: 1.2mm;
+  margin-bottom: 0.7mm;
   padding-left: 6mm;
 }
 .toc-item .t { }
 .toc-item .d {
   flex: 1;
-  border-bottom: 0.2mm dotted #b9c6bf;
-  margin: 0 1.5mm 1mm;
+  border-bottom: 0.2mm dotted #c4cfc9;
+  margin: 0 2mm 0.9mm;
 }
 
 /* ---------------------------------------------------------------- utility */
@@ -375,7 +379,8 @@ def build():
     cover = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>%(product)s Open API %(version)s</title>
-<style>%(css)s</style></head>
+<style>%(css)s
+@page { size: A4; margin: 0; }</style></head>
 <body>
 <div class="cover">
   <div class="cover-plate"><img class="cover-icon" src="%(icon)s" alt=""></div>
@@ -394,14 +399,18 @@ def build():
     body = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>%(product)s Open API %(version)s</title>
-<style>%(css)s</style></head>
+<style>%(css)s
+@page { size: A4; margin: 20mm 24mm 22mm 24mm; }</style></head>
 <body>
 <section>
   <h2 class="part">Document history</h2>
   <table class="hist"><thead><tr><th>Revision</th><th>Release date</th><th>Changes / notes</th></tr></thead>
   <tbody>%(hist)s</tbody></table>
 
-  <h2 class="part" style="margin-top:12mm">Contents</h2>
+</section>
+
+<section class="page-break">
+  <h2 class="part">Contents</h2>
   <div class="toc">%(toc)s</div>
 </section>
 
