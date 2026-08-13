@@ -150,14 +150,43 @@ public class DeviceController : ControllerBase
             if (response.Items == null || response.Items.Count == 0)
                 return Ok(new { message = "No devices found", devices = new List<object>() });
 
+            // Loaded once so hand-added devices can be matched by MAC below.
+            // These stay tracked, so edits to them are saved with everything else.
+            var storeDevices = await _context.DeviceMaster
+                .Where(d => d.StoreId == storeMaster.Id)
+                .ToListAsync();
+
             foreach (var device in response.Items)
             {
                 if (string.IsNullOrEmpty(device.Id))
                     continue;
 
-                // Look for existing device by MinewDeviceId
+                // Match on the cloud id first, then fall back to the MAC.
+                // A device added by hand carries MinewDeviceId = its MAC (see
+                // CreateDeviceAsync), so matching on the cloud id alone never
+                // recognised it and every sync inserted a duplicate row - the
+                // original keeping ScreenId null forever.
+                var normalisedMac = NormaliseMac(device.Mac);
+
                 var existing = await _context.DeviceMaster
                     .FirstOrDefaultAsync(d => d.MinewDeviceId == device.Id);
+
+                if (existing == null && normalisedMac.Length > 0)
+                {
+                    // Matched in memory rather than in SQL: chained Replace calls
+                    // are not reliably translatable, and a store holds few enough
+                    // devices that one load beats a query per cloud device.
+                    existing = storeDevices.FirstOrDefault(d =>
+                        NormaliseMac(d.MACAddress) == normalisedMac);
+
+                    if (existing != null)
+                    {
+                        // Repair the link and store the MAC in the canonical form
+                        // so the next sync matches on the cloud id directly.
+                        existing.MinewDeviceId = device.Id;
+                        existing.MACAddress = normalisedMac;
+                    }
+                }
 
                 DateTime.TryParse(device.Lastupdate, out var lastSeen);
 
@@ -165,11 +194,14 @@ public class DeviceController : ControllerBase
                 long? screenId = null;
                 if (device.ScreenInfo != null)
                 {
-                    // Find existing DeviceScreen record with matching dimensions and ESL
+                    // Width + height identify the panel. Inch is deliberately not
+                    // part of the match: Minew sometimes omits it, and requiring
+                    // it created a second DeviceScreen row for a size already in
+                    // the table. Reuse the existing row when the dimensions are
+                    // already known; only insert when they are not.
                     var deviceScreen = await _context.DeviceScreens
                         .FirstOrDefaultAsync(ds => ds.Width == device.ScreenInfo.Width &&
                                                    ds.Height == device.ScreenInfo.Height &&
-                                                   ds.Inch == device.ScreenInfo.Inch &&
                                                    ds.ScreenTypeId == (int)ScreenType.ESL_Ink);
 
                     if (deviceScreen == null)
@@ -265,13 +297,21 @@ public class DeviceController : ControllerBase
                     d.Id,
                     mac = d.MACAddress,
                     deviceName = d.Name,
-                    ScreenInch = d.DeviceScreen.Inch,
-                    ScreenWidth = d.DeviceScreen.Width,
-                    ScreenHeight = d.DeviceScreen.Height,
+                    // ScreenId is optional, so this is a LEFT JOIN and these
+                    // columns come back NULL for any device saved without a
+                    // screen. Inch/Width/Height are non-nullable on DeviceScreen,
+                    // and materialising NULL into them threw "Nullable object
+                    // must have a value" - failing the whole sync.
+                    ScreenInch = (decimal?)d.DeviceScreen.Inch,
+                    ScreenWidth = (int?)d.DeviceScreen.Width,
+                    ScreenHeight = (int?)d.DeviceScreen.Height,
                     d.ScreenColor,
                     d.Firmware,
                     d.Hardware,
-                    status = d.Status.Name, // Assuming Status table has StatusName field
+                    // Null-safe: StatusId 0 is used as a sentinel here
+                    // (see isOnline below) and has no Status row, which an
+                    // inner join would silently filter the device out on.
+                    status = d.Status != null ? d.Status.Name : "Unknown",
                     d.Battery,
                     d.LastSeen,
                     storeId = d.StoreId,
@@ -306,6 +346,197 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Finds the DeviceScreens row for a panel size, creating it when the size
+    /// is new. Width + height identify the panel; Inch is stored but not matched
+    /// on, because Minew sometimes omits it and requiring it would duplicate a
+    /// size already in the table.
+    /// </summary>
+    private async Task<long?> ResolveScreenIdAsync(ScreenInfo screenInfo, string screenSizeLabel)
+    {
+        if (screenInfo?.Width == null || screenInfo.Height == null)
+            return null;
+
+        var screen = await _context.DeviceScreens
+            .FirstOrDefaultAsync(ds => ds.Width == screenInfo.Width &&
+                                       ds.Height == screenInfo.Height &&
+                                       ds.ScreenTypeId == (int)ScreenType.ESL_Ink);
+
+        if (screen == null)
+        {
+            screen = new DeviceScreen
+            {
+                Name = $"Minew {screenSizeLabel ?? $"{screenInfo.Width}x{screenInfo.Height}"}",
+                Width = screenInfo.Width ?? 0,
+                Height = screenInfo.Height ?? 0,
+                Inch = screenInfo.Inch ?? 0,
+                ScreenTypeId = (int)ScreenType.ESL_Ink,
+                CreatedDate = DateTime.UtcNow,
+                CreatedUser = 0,
+            };
+            _context.DeviceScreens.Add(screen);
+            await _context.SaveChangesAsync(); // needed to get the identity
+        }
+
+        return screen.Id;
+    }
+
+    /// <summary>
+    /// Fills in screen dimensions for a store's devices from the Minew cloud.
+    ///
+    /// A device added locally (single add or batch import) has no screen: the
+    /// panel size is only knowable from Minew's response. This pulls the store's
+    /// labels and, for each one, maps the local row onto the matching
+    /// DeviceScreens entry - reusing the row when those dimensions are already
+    /// known and inserting one when they are not. It also repairs MinewDeviceId,
+    /// which batch import sets to the MAC as a placeholder.
+    /// </summary>
+    /// <returns>How many local devices were updated.</returns>
+    private async Task<int> BackfillDeviceScreensAsync(StoreMaster store, string eqStatus = "1,2,8,9")
+    {
+        if (store == null || string.IsNullOrWhiteSpace(store.MinewStoreId))
+            return 0;
+
+        var provider = _eslProviderFactory.GetProvider("Minew");
+        var response = await provider.GetDevicesFromCloudAsync(store.MinewStoreId, eqStatus);
+
+        if (response == null || response.Code != 200 || response.Items == null)
+            return 0;
+
+        var storeDevices = await _context.DeviceMaster
+            .Where(d => d.StoreId == store.Id)
+            .ToListAsync();
+
+        var updated = 0;
+
+        foreach (var cloudDevice in response.Items)
+        {
+            var normalisedMac = NormaliseMac(cloudDevice.Mac);
+            if (normalisedMac.Length == 0) continue;
+
+            // Every local row for this MAC, not just the first. Duplicates exist
+            // in the wild (a hand-added row plus a sync-created one), and
+            // updating only one left the other pointing at a stale screen.
+            var matches = storeDevices
+                .Where(d =>
+                    (!string.IsNullOrEmpty(cloudDevice.Id) && d.MinewDeviceId == cloudDevice.Id) ||
+                    NormaliseMac(d.MACAddress) == normalisedMac)
+                .ToList();
+
+            if (matches.Count == 0) continue;
+
+            var screenIdForMac = await ResolveScreenIdAsync(cloudDevice.ScreenInfo, cloudDevice.ScreenSize);
+
+            foreach (var local in matches)
+            {
+            var changed = false;
+
+            // Batch import stores the MAC as a placeholder id - replace it with
+            // the real cloud id so later syncs match directly.
+            if (!string.IsNullOrEmpty(cloudDevice.Id) && local.MinewDeviceId != cloudDevice.Id)
+            {
+                local.MinewDeviceId = cloudDevice.Id;
+                changed = true;
+            }
+
+            if (local.MACAddress != normalisedMac)
+            {
+                local.MACAddress = normalisedMac;
+                changed = true;
+            }
+
+            if (screenIdForMac.HasValue && local.ScreenId != screenIdForMac)
+            {
+                local.ScreenId = screenIdForMac;
+                changed = true;
+            }
+
+            if (cloudDevice.ScreenInfo?.Color != null && local.ScreenColor != cloudDevice.ScreenInfo.Color)
+            {
+                local.ScreenColor = cloudDevice.ScreenInfo.Color;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                local.LastSyncTime = DateTime.UtcNow;
+                updated++;
+            }
+            }
+        }
+
+        if (updated > 0)
+            await _context.SaveChangesAsync();
+
+        return updated;
+    }
+
+    /// <summary>
+    /// MACs arrive in mixed shapes (e0:00:00:00:f8:53 vs e0000000f853). Compare
+    /// them in one canonical form so the same label is never treated as two.
+    /// </summary>
+    private static string NormaliseMac(string mac) =>
+        (mac ?? string.Empty).Replace(":", "").Replace("-", "").Replace(" ", "").ToLower();
+
+    /// <summary>
+    /// Fills in missing screen dimensions for a store's devices from Minew.
+    /// Use after adding devices locally, where the panel size is not yet known.
+    /// </summary>
+    [Authorize(Roles = "Admin,Manager")]
+    [HttpPost("devices/refresh-screens")]
+    public async Task<IActionResult> RefreshDeviceScreens([FromQuery] long storeId)
+    {
+        try
+        {
+            var store = await _context.StoreMaster.FirstOrDefaultAsync(s => s.Id == storeId);
+
+            if (store == null)
+                return BadRequest(new { message = "Store not found" });
+
+            if (string.IsNullOrWhiteSpace(store.MinewStoreId))
+                return BadRequest(new { message = "This store is not linked to Minew yet." });
+
+            var updated = await BackfillDeviceScreensAsync(store);
+
+            return Ok(new
+            {
+                message = updated > 0
+                    ? $"Updated screen details for {updated} device(s)."
+                    : "No devices needed a screen update.",
+                updated,
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lists the merchant's dynamic goodsMap fields and flags the image-shaped
+    /// ones - use this to confirm which key a template's picture is bound to.
+    /// </summary>
+    [HttpGet("minew/dynamic-fields")]
+    public async Task<IActionResult> GetMinewDynamicFields()
+    {
+        try
+        {
+            var token = await GetToken();
+            var fields = await _minewService.GetDynamicFieldsAsync(token);
+
+            return Ok(new
+            {
+                total = fields.Count,
+                imageLike = fields.Where(f => LooksLikeImageField(f.Id)).Select(f => f.Id).ToList(),
+                fields = fields.Select(f => new { f.Id, f.Name, f.ColunmDataType }).ToList(),
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     [HttpGet("devices/local")]
     public async Task<IActionResult> GetLocalDevices()
     {
@@ -319,10 +550,14 @@ public class DeviceController : ControllerBase
                     id = d.Id,
                     mac = d.MACAddress,
                     deviceName = d.Name,
+                    // ScreenId is optional, so this is a LEFT JOIN. Inch/Height/
+                    // Width are non-nullable on DeviceScreen, and materialising a
+                    // NULL into them threw "Nullable object must have a value"
+                    // for every device saved without a screen.
                     screenSize = d.DeviceScreen.AspectRatio,
-                    ScreenInch = d.DeviceScreen.Inch,
-                    ScreenHeight = d.DeviceScreen.Height,
-                    ScreenWidth = d.DeviceScreen.Width,
+                    ScreenInch = (decimal?)d.DeviceScreen.Inch,
+                    ScreenHeight = (int?)d.DeviceScreen.Height,
+                    ScreenWidth = (int?)d.DeviceScreen.Width,
                     ScreenColor = d.ScreenColor,
                     status = d.Status,
                     battery = d.Battery,
@@ -461,6 +696,18 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// True when Minew's per-MAC result means the label was accepted. The cloud
+    /// localises this string, so both the English and Chinese forms count.
+    /// </summary>
+    private static bool IsMinewSuccess(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var v = value.Trim();
+        return v.Equals("success", StringComparison.OrdinalIgnoreCase) || v == "成功";
+    }
+
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("device")]
     [ProducesResponseType(typeof(HttpResponseData<DeviceDto>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -519,6 +766,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPut("device/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<DeviceDto>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -588,6 +836,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("device/{id}/user/{userId}")]
     [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -647,7 +896,32 @@ public class DeviceController : ControllerBase
         {
             var device = await _context.DeviceMaster.FirstOrDefaultAsync(d => d.MACAddress == mac);
             var provider = _eslProviderFactory.GetProvider(device?.DeviceType ?? "Minew");
-            var result = await provider.LightUpDeviceAsync(mac, storeId, color, total, period, interval, brightness);
+
+            // Minew addresses stores by its own id. Callers are inconsistent -
+            // Device Management passes the local StoreMaster id while Device
+            // Templates passes the cloud id - and sending a local id got
+            // "门店不存在" (store does not exist) with the label never blinking.
+            var cloudStoreId = await ResolveMinewStoreIdAsync(storeId);
+            if (cloudStoreId == null)
+                return BadRequest(new { message = $"Unknown store '{storeId}'." });
+
+            var result = await provider.LightUpDeviceAsync(
+                mac, cloudStoreId, color, total, period, interval, brightness);
+
+            // Minew reports failure in the body, not the HTTP status, so an
+            // unchecked result made every blink look successful.
+            // Via object, not dynamic: the payload is a JsonElement, and both
+            // `== null` and an inferred local resolve at runtime and blow up.
+            object payload = result;
+            string raw = payload?.ToString() ?? string.Empty;
+            if (!MinewBodySucceeded(raw, out string minewMessage))
+            {
+                return StatusCode(502, new
+                {
+                    message = $"Minew rejected the blink: {minewMessage}",
+                });
+            }
+
             return Ok(result);
         }
         catch (Exception ex)
@@ -656,6 +930,63 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Accepts either a local StoreMaster id or a Minew cloud id and returns the
+    /// cloud id. Returns null when neither matches.
+    /// </summary>
+    private async Task<string> ResolveMinewStoreIdAsync(string storeId)
+    {
+        if (string.IsNullOrWhiteSpace(storeId)) return null;
+
+        if (long.TryParse(storeId, out var localId))
+        {
+            var byLocalId = await _context.StoreMaster
+                .FirstOrDefaultAsync(s => s.Id == localId);
+
+            if (byLocalId != null)
+                return string.IsNullOrWhiteSpace(byLocalId.MinewStoreId) ? null : byLocalId.MinewStoreId;
+        }
+
+        // Already a cloud id.
+        var byCloudId = await _context.StoreMaster
+            .FirstOrDefaultAsync(s => s.MinewStoreId == storeId);
+
+        return byCloudId?.MinewStoreId;
+    }
+
+    /// <summary>
+    /// True when a raw Minew response body carries code 200.
+    /// </summary>
+    private static bool MinewBodySucceeded(string rawResponse, out string message)
+    {
+        message = null;
+        if (string.IsNullOrWhiteSpace(rawResponse)) { message = "empty response"; return false; }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawResponse);
+            if (doc.RootElement.TryGetProperty("msg", out var msgEl))
+                message = msgEl.GetString();
+
+            if (doc.RootElement.TryGetProperty("code", out var codeEl))
+            {
+                if (codeEl.ValueKind == JsonValueKind.Number && codeEl.TryGetInt32(out var c))
+                    return c == 200;
+                if (codeEl.ValueKind == JsonValueKind.String && int.TryParse(codeEl.GetString(), out var cs))
+                    return cs == 200;
+            }
+
+            // No code field - treat as success rather than blocking a working call.
+            return true;
+        }
+        catch (JsonException)
+        {
+            message = "unreadable response";
+            return false;
+        }
+    }
+
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("devices/batch-add-minew")]
     [ProducesResponseType(typeof(HttpResponseData<BatchAddResult>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<BatchAddResult>), 400)]
@@ -735,7 +1066,11 @@ public class DeviceController : ControllerBase
             }
 
             // Analyze results
-            var addedCount = minewResponse.Data?.Values.Count(v => v.ToLower() == "success") ?? 0;
+            // Minew answers per MAC in the account's own language - this tenant
+            // returns "成功", not "success". Matching only the English literal
+            // left addedCount at 0 even when every label was added, which also
+            // skipped the post-add local sync gated on addedCount > 0 below.
+            var addedCount = minewResponse.Data?.Values.Count(IsMinewSuccess) ?? 0;
             var failedCount = cleanedMacs.Count - addedCount;
 
             // STEP 1: Wake up the successfully added devices
@@ -747,9 +1082,11 @@ public class DeviceController : ControllerBase
             {
                 try
                 {
-                    // Get only the successfully added MACs
+                    // Same localisation trap as addedCount above: this tenant
+                    // answers "成功", so matching the English literal left
+                    // successMacs empty and the wake step never ran.
                     var successMacs = minewResponse.Data
-                        .Where(kv => kv.Value.ToLower() == "success")
+                        .Where(kv => IsMinewSuccess(kv.Value))
                         .Select(kv => kv.Key)
                         .ToList();
 
@@ -877,6 +1214,22 @@ public class DeviceController : ControllerBase
                     }
 
                     await _context.SaveChangesAsync();
+
+                    // Screen size is only knowable from Minew, and the rows just
+                    // written have ScreenId null with the MAC standing in for
+                    // MinewDeviceId. Read the store back and fill both in.
+                    try
+                    {
+                        var screensSet = await BackfillDeviceScreensAsync(store);
+                        if (screensSet > 0)
+                            _logger.LogInformation("Backfilled screens for {Count} device(s)", screensSet);
+                    }
+                    catch (Exception screenEx)
+                    {
+                        // The devices are in Minew either way - do not fail the
+                        // import because the follow-up read did not work.
+                        _logger.LogWarning(screenEx, "Could not backfill device screens after batch add");
+                    }
                 }
             }
 
@@ -906,6 +1259,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("devices/batch-add-minew-upload")]
     [ProducesResponseType(typeof(HttpResponseData<BatchAddResult>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<BatchAddResult>), 400)]
@@ -1009,6 +1363,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("devices/batch-wake")]
     [ProducesResponseType(typeof(HttpResponseData<BatchWakeResult>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<BatchWakeResult>), 400)]
@@ -1131,6 +1486,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("devices/delayed-sync")]
     [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -1347,6 +1703,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("screen")]
     public async Task<IActionResult> CreateScreen([FromBody] DeviceScreenCreateDto createDto)
     {
@@ -1379,6 +1736,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPut("screen")]
     public async Task<IActionResult> UpdateScreen([FromBody] DeviceScreenUpdateDto updateDto)
     {
@@ -1419,6 +1777,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("screen/{id}")]
     public async Task<IActionResult> DeleteScreen(long id)
     {
@@ -1470,6 +1829,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPatch("screen/{id}/toggle-active")]
     public async Task<IActionResult> ToggleScreenActive(long id, [FromBody] int userId)
     {
@@ -1627,6 +1987,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("gateway")]
     [ProducesResponseType(typeof(HttpResponseData<GatewayDto>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -1685,6 +2046,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPut("gateway/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<GatewayDto>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -1736,6 +2098,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("gateway/{id}/user/{userId}")]
     [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -1803,7 +2166,12 @@ public class DeviceController : ControllerBase
                     Description = g.Description,
                     StoreName = g.Store.StoreName,
                     MinewGatewayId = g.MinewGatewayId,
-                    Status = g.Status.Name,
+                    // Null-safe: StatusId is a non-nullable FK, so dereferencing
+                    // the navigation directly makes EF emit an INNER JOIN. Any
+                    // gateway whose StatusId has no Status row was silently
+                    // dropped from this list - the endpoint returned an empty
+                    // array while the gateway was present and online.
+                    Status = g.Status != null ? g.Status.Name : "Unknown",
                     GatewayType = g.GatewayType,
                     HardwareVersion = g.HardwareVersion,
                     FirmwareVersion = g.FirmwareVersion,
@@ -1823,6 +2191,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("gateway/add-to-minew")]
     public async Task<IActionResult> AddGatewayToMinew([FromBody] AddGatewayToMinewRequest request)
     {
@@ -2197,6 +2566,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("template/{id}/user/{userId}")]
     [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -2250,6 +2620,7 @@ public class DeviceController : ControllerBase
 
     #region Device - Template Combination
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("combos")]
     public async Task<IActionResult> CreateCombo([FromBody] CreateComboRequest request)
     {
@@ -2426,6 +2797,7 @@ public class DeviceController : ControllerBase
     /// <summary>
     /// Update an existing DeviceTemplateCombo
     /// </summary>
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPut("combos/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<DeviceTemplateCombos>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -2486,6 +2858,7 @@ public class DeviceController : ControllerBase
     /// <summary>
     /// Update an existing DeviceTemplateCombo
     /// </summary>
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("combos/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<DeviceTemplateCombos>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -2543,6 +2916,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("combos/{id}/user/{userId}")]
     [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -2712,6 +3086,7 @@ public class DeviceController : ControllerBase
     /// <summary>
     /// Create a new DeviceMessageCombo
     /// </summary>
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("messagecombo")]
     [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 201)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -2764,6 +3139,7 @@ public class DeviceController : ControllerBase
     /// <summary>
     /// Update an existing DeviceMessageCombo
     /// </summary>
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPut("messagecombo/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -2824,6 +3200,7 @@ public class DeviceController : ControllerBase
     /// <summary>
     /// Delete a DeviceMessageCombo
     /// </summary>
+    [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("messagecombo/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -2998,6 +3375,7 @@ public class DeviceController : ControllerBase
     /// <summary>
     /// Deactivate all DeviceMessageCombos by Device ID
     /// </summary>
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPut("messagecombo/device/{deviceId}/deactivate")]
     [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -3072,6 +3450,7 @@ public class DeviceController : ControllerBase
     /// <summary>
     /// Create multiple DeviceMessageCombos in bulk
     /// </summary>
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("messagecombo/bulk")]
     [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 201)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -3115,6 +3494,7 @@ public class DeviceController : ControllerBase
     /// <summary>
     /// Deactivate multiple DeviceMessageCombos
     /// </summary>
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPut("messagecombo/deactivate-multiple")]
     [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -3154,6 +3534,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("messagecombo/{id}/user/{userId}")]
     [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -3207,6 +3588,7 @@ public class DeviceController : ControllerBase
 
     #region Combination Assignments(to shelf or product) Handlers 
     // ============ ASSIGNMENTS (Using DeviceTemplateAssignment Table) ============
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("assignments")]
     [ProducesResponseType(typeof(HttpResponseData<AssignmentDto>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -3351,6 +3733,7 @@ public class DeviceController : ControllerBase
     }
 
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPut("assignments/{id}/order")]
     [ProducesResponseType(typeof(HttpResponseData<AssignmentDto>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -3399,6 +3782,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("assignments/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 401)]
@@ -3709,6 +4093,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind")]
     public async Task<IActionResult> BindData([FromBody] BindDataRequest request)
     {
@@ -3796,6 +4181,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind-unified")]
     public async Task<IActionResult> BindDataUnified([FromBody] UnifiedBindDataRequest request)
     {
@@ -3998,6 +4384,7 @@ public class DeviceController : ControllerBase
     }
   
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind-shelf")]
     public async Task<IActionResult> BindShelfData([FromBody] BindShelfDataRequest request)
     {
@@ -4107,6 +4494,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind/quick-product")]
     public async Task<IActionResult> QuickBindProduct([FromBody] QuickBindRequest request)
     {
@@ -4152,6 +4540,7 @@ public class DeviceController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind/batch")]
     public async Task<IActionResult> BatchBind([FromBody] BatchBindRequest request)
     {
@@ -4337,6 +4726,72 @@ public class DeviceController : ControllerBase
             ["p_code"] = shelfCode ?? "",
             ["image"] = imageBase64 ?? "" // Optional image for shelf
         };
+    }
+
+    /// <summary>
+    /// Whether a dynamic field id looks like an image slot. Minew names these
+    /// per merchant - IMAGE001, base64, ICON1 and so on - so match on shape
+    /// rather than assuming one universal key.
+    /// </summary>
+    private static bool LooksLikeImageField(string fieldId)
+    {
+        if (string.IsNullOrWhiteSpace(fieldId)) return false;
+        var id = fieldId.Trim().ToLowerInvariant();
+        return id.Contains("image") || id.Contains("img") ||
+               id.Contains("base64") || id.Contains("icon") || id.Contains("pic");
+    }
+
+    /// <summary>
+    /// The goodsMap keys a picture should be sent under. Discovered from the
+    /// merchant's dynamic fields; falls back to "image" when the lookup fails so
+    /// binding never breaks just because this call did.
+    /// </summary>
+    private async Task<List<string>> ResolveImageFieldKeysAsync()
+    {
+        try
+        {
+            var token = await GetToken();
+            var fields = await _minewService.GetDynamicFieldsAsync(token);
+
+            var keys = fields
+                .Select(f => f.Id)
+                .Where(LooksLikeImageField)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // Minew ignores keys a template does not use, so sending the picture
+            // under every image-shaped field is safe and means the one the
+            // template is actually bound to is always covered.
+            if (!keys.Any(k => string.Equals(k, "image", StringComparison.OrdinalIgnoreCase)))
+                keys.Add("image");
+
+            return keys;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read Minew dynamic fields; falling back to the 'image' key");
+            return new List<string> { "image" };
+        }
+    }
+
+    /// <summary>
+    /// Minew wants the picture as a bare base64 string ("the data is base64
+    /// string format"). Messages are stored as data URIs
+    /// ("data:image/jpeg;base64,...."), and sending that whole string meant the
+    /// cloud accepted the bind but could not decode the picture - a label that
+    /// rendered the template with no image.
+    /// </summary>
+    private static string ToBareBase64(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return content;
+
+        if (content.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            var marker = content.IndexOf("base64,", StringComparison.OrdinalIgnoreCase);
+            if (marker > 0) return content[(marker + 7)..].Trim();
+        }
+
+        return content.Trim();
     }
 
     private bool IsValidBase64(string base64String)

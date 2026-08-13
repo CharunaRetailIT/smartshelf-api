@@ -44,7 +44,12 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
         public decimal MinimumPrice { get; set; }
         public decimal MaximumPrice { get; set; }
         public string Description { get; set; }
-        public bool IsActive { get; set; }
+
+        // Nullable on purpose: a plain bool defaults to false, so any caller that
+        // omitted this field silently deactivated the product it was editing.
+        // Null now means "leave the current value alone".
+        public bool? IsActive { get; set; }
+
         public int? UpdatedUser { get; set; }
         public long StoreId { get; set; }
     }

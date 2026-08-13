@@ -161,6 +161,36 @@ namespace TERMS_LOYALTY_API.Repository
                 if (request.IsActive.HasValue)
                     query = query.Where(q => q.IsActive == request.IsActive.Value);
 
+                // Everything below was declared on QueuePagedRequest but never
+                // applied, so the Status dropdown and the date range in Queue
+                // Management silently returned every row.
+                if (!string.IsNullOrEmpty(request.Status))
+                {
+                    // The UI sends "COMPLETED" while Status.Name is "Completed".
+                    // SQL Server's default collation is case-insensitive, so a
+                    // direct comparison matches either way.
+                    var status = request.Status.Trim();
+                    query = query.Where(q => q.Status != null && q.Status.Name == status);
+                }
+
+                if (request.DeviceId.HasValue)
+                    query = query.Where(q => q.DeviceId == request.DeviceId.Value);
+
+                if (!string.IsNullOrEmpty(request.LocationType))
+                {
+                    var locationType = request.LocationType.Trim();
+                    query = query.Where(q => q.LocationType == locationType);
+                }
+
+                if (request.LocationId.HasValue)
+                    query = query.Where(q => q.LocationId == request.LocationId.Value);
+
+                if (request.StartDateFrom.HasValue)
+                    query = query.Where(q => q.StartDate >= request.StartDateFrom.Value);
+
+                if (request.StartDateTo.HasValue)
+                    query = query.Where(q => q.StartDate <= request.StartDateTo.Value);
+
                 if (!string.IsNullOrEmpty(request.SearchTerm))
                 {
                     var term = request.SearchTerm.Trim();
@@ -215,7 +245,7 @@ namespace TERMS_LOYALTY_API.Repository
                         ShelfName = q.Shelf != null ? q.Shelf.Name : null,
                         MessageTitle = q.Message != null ? q.Message.Title : null,
                         TemplateName = q.Template != null ? q.Template.Name : null,
-                        Status = q.Status.Name,
+                        Status = q.Status != null ? q.Status.Name : "Unknown",
                         Priority = q.Priority.PriorityName,
                         StartDate = q.StartDate,
                         EndDate = q.EndDate,
@@ -346,10 +376,14 @@ namespace TERMS_LOYALTY_API.Repository
                     DeviceId = request.DeviceId,
                     TemplateId = request.TemplateId,
                     MessageId = request.MessageId,
-                    LocationType = request.LocationType,
+                    // Stored and compared in one canonical casing - see
+                    // ExecuteMinewQueue, which resolves the goodsMap from this.
+                    LocationType = request.LocationType?.Trim().ToUpperInvariant(),
                     LocationId = request.LocationId,
-                    ProductId = request.LocationType == "PRODUCT" ? request.LocationId : (long?)null,
-                    ShelfId = request.LocationType == "SHELF" ? request.LocationId : (long?)null,
+                    ProductId = request.LocationType?.Trim().ToUpperInvariant() == "PRODUCT"
+                        ? request.LocationId : (long?)null,
+                    ShelfId = request.LocationType?.Trim().ToUpperInvariant() == "SHELF"
+                        ? request.LocationId : (long?)null,
                     StartDate = request.StartDate,
                     EndDate = request.EndDate,
                     IsActive = true,
@@ -412,7 +446,12 @@ namespace TERMS_LOYALTY_API.Repository
                     DeviceId = deviceId,
                     TemplateId = assignment.DeviceTemplateCombo?.TemplateId,
                     MessageId = assignment.DeviceMessageCombo?.MessageId,
-                    LocationType = assignment.LocationType,
+                    // Normalised on write: ExecuteMinewQueue compares this against
+                    // "PRODUCT"/"SHELF", and an assignment stores "Product". The
+                    // raw value fell through both branches and bound a placeholder
+                    // goodsMap (id "0"), which Minew answers with 数据不存在 -
+                    // or accepts, and paints an empty label.
+                    LocationType = assignment.LocationType?.Trim().ToUpperInvariant(),
                     LocationId = assignment.LocationId,
                     ProductId = assignment.LocationType?.Trim().ToUpper() == "PRODUCT" ? assignment.LocationId : null,
                     ShelfId = assignment.LocationType?.Trim().ToUpper() == "SHELF" ? assignment.LocationId : null,
@@ -746,7 +785,7 @@ namespace TERMS_LOYALTY_API.Repository
                         LocationName = GetLocationName(q.LocationType, q.LocationId, q.ProductId, q.ShelfId),
                         StartDate = q.StartDate,
                         EndDate = q.EndDate,
-                        Status = q.Status.Name,
+                        Status = q.Status != null ? q.Status.Name : "Unknown",
                         Priority = q.Priority.PriorityName,
                         IsActive = q.IsActive,
                         DisplayOrder = q.DisplayOrder,
@@ -789,7 +828,7 @@ namespace TERMS_LOYALTY_API.Repository
                         LocationName = GetLocationName(q.LocationType, q.LocationId, q.ProductId, q.ShelfId),
                         StartDate = q.StartDate,
                         EndDate = q.EndDate,
-                        Status = q.Status.Name,
+                        Status = q.Status != null ? q.Status.Name : "Unknown",
                         Priority = q.Priority.PriorityName,
                         IsActive = q.IsActive,
                         DisplayOrder = q.DisplayOrder,
@@ -828,7 +867,7 @@ namespace TERMS_LOYALTY_API.Repository
                         LocationName = GetLocationName(q.LocationType, q.LocationId, q.ProductId, q.ShelfId),
                         StartDate = q.StartDate,
                         EndDate = q.EndDate,
-                        Status = q.Status.Name,
+                        Status = q.Status != null ? q.Status.Name : "Unknown",
                         Priority = q.Priority.PriorityName,
                         IsActive = q.IsActive,
                         DisplayOrder = q.DisplayOrder,
@@ -867,7 +906,7 @@ namespace TERMS_LOYALTY_API.Repository
                         LocationName = GetLocationName(q.LocationType, q.LocationId, q.ProductId, q.ShelfId),
                         StartDate = q.StartDate,
                         EndDate = q.EndDate,
-                        Status = q.Status.Name,
+                        Status = q.Status != null ? q.Status.Name : "Unknown",
                         Priority = q.Priority.PriorityName,
                         IsActive = q.IsActive,
                         DisplayOrder = q.DisplayOrder,
@@ -967,6 +1006,11 @@ namespace TERMS_LOYALTY_API.Repository
 
         private async Task ExecuteQueueContent(QueueMaster queue)
         {
+            // Every attempt is recorded, pass or fail. QueueMaster only carries a
+            // single LastAttempt/StatusId that each run overwrites, so without
+            // this there was no history to explain why a label never changed.
+            var startedAt = DateTime.UtcNow;
+
             try
             {
                 if (queue.Device == null)
@@ -985,11 +1029,53 @@ namespace TERMS_LOYALTY_API.Repository
                     default:
                         throw new InvalidOperationException($"Unsupported device type: {queue.Device.DeviceType}");
                 }
+
+                AddExecutionLog(queue, startedAt, (int)QueueStatus.Completed);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error executing queue {queue.Id} content");
+                AddExecutionLog(queue, startedAt, (int)QueueStatus.Failed);
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Queues a QueueExecutionLog row for the current attempt. Added to the
+        /// change tracker only - the caller's SaveChangesAsync persists it, and
+        /// on the failure path the caller's catch does the saving.
+        /// </summary>
+        private void AddExecutionLog(QueueMaster queue, DateTime startedAt, int statusId)
+        {
+            try
+            {
+                var isMessage = string.Equals(queue.QueueType, "MESSAGE_QUEUE",
+                    StringComparison.OrdinalIgnoreCase);
+
+                // TargetId is an int column; template ids are Minew's 19-digit
+                // snowflakes, so store 0 rather than overflow it.
+                var targetId = 0;
+                if (isMessage && queue.MessageId.HasValue)
+                    targetId = (int)queue.MessageId.Value;
+
+                _context.QueueExecutionLog.Add(new QueueExecutionLog
+                {
+                    QueueEntryId = (int)queue.Id,
+                    QueueTargetTypeId = (int)(isMessage
+                        ? QueueTargetType.Message
+                        : QueueTargetType.Template),
+                    TargetId = targetId,
+                    DisplayStartTime = startedAt,
+                    DisplayEndTime = DateTime.UtcNow,
+                    ActualDuration = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds,
+                    StatusId = statusId,
+                    CreatedDate = DateTime.UtcNow,
+                });
+            }
+            catch (Exception ex)
+            {
+                // Logging must never be the reason an execution fails.
+                _logger.LogWarning(ex, "Could not record execution log for queue {QueueId}", queue.Id);
             }
         }
 
@@ -1004,9 +1090,13 @@ namespace TERMS_LOYALTY_API.Repository
             if (store == null)
                 throw new InvalidOperationException("Store not found for device");
 
-            // Get product data if it's a product queue
+            // Case-insensitive: queues created from an assignment carry the
+            // assignment's own casing ("Product"), and a case-sensitive compare
+            // silently skipped the real data.
+            var locationType = queue.LocationType?.Trim().ToUpperInvariant();
+
             Dictionary<string, string> goodsMap = null;
-            if (queue.LocationType == "PRODUCT" && queue.ProductId.HasValue)
+            if (locationType == "PRODUCT" && queue.ProductId.HasValue)
             {
                 var product = await _context.ProductMaster.FindAsync(queue.ProductId.Value);
                 if (product != null)
@@ -1014,7 +1104,7 @@ namespace TERMS_LOYALTY_API.Repository
                     goodsMap = GenerateGoodsMapFromProduct(product);
                 }
             }
-            else if (queue.LocationType == "SHELF" && queue.ShelfId.HasValue)
+            else if (locationType == "SHELF" && queue.ShelfId.HasValue)
             {
                 var shelf = await _context.ShelfMaster.FindAsync(queue.ShelfId.Value);
                 if (shelf != null)
@@ -1023,12 +1113,16 @@ namespace TERMS_LOYALTY_API.Repository
                 }
             }
 
-            goodsMap ??= new Dictionary<string, string>
+            // Binding a placeholder pushes id "0" with a 0.00 price, which Minew
+            // either rejects (数据不存在) or renders as an empty label. Either way
+            // it is never what the operator asked for, so fail loudly instead.
+            if (goodsMap == null)
             {
-                ["id"] = "0",
-                ["p_name"] = queue.QueueType,
-                ["price"] = "0.00"
-            };
+                throw new InvalidOperationException(
+                    $"Queue {queue.Id} has no bindable content: locationType " +
+                    $"'{queue.LocationType}' with productId {queue.ProductId?.ToString() ?? "null"} " +
+                    $"and shelfId {queue.ShelfId?.ToString() ?? "null"} resolved to nothing.");
+            }
 
             // A Minew queue can carry a message alongside its template - the message
             // image rides in goodsMap["image"], same as the manual bind-unified path.
@@ -1039,6 +1133,9 @@ namespace TERMS_LOYALTY_API.Repository
 
                 if (message != null && IsValidBase64(message.ContentData))
                 {
+                    // Sent exactly as stored, data URI prefix included: that is
+                    // what the known-working bind does, and Minew renders it.
+                    // Stripping the prefix is NOT an improvement here.
                     goodsMap["image"] = message.ContentData;
                 }
             }
@@ -1062,9 +1159,79 @@ namespace TERMS_LOYALTY_API.Repository
 
             var response = await _minewService.BindData(token, bindRequest);
 
-            // Store binding data
-            queue.BindingData = response?.ToString();
+            // JsonDocument does not override ToString(), so the old assignment
+            // stored the literal "System.Text.Json.JsonDocument" and discarded
+            // Minew's actual answer - leaving no way to tell whether a queue had
+            // really written to the label.
+            var rawBindResponse = response?.RootElement.GetRawText() ?? string.Empty;
+            queue.BindingData = rawBindResponse;
             queue.LastAttempt = DateTime.UtcNow;
+
+            // Minew reports failure in the body, not the HTTP status. Unchecked,
+            // a rejected bind still left the queue marked Completed. Throwing
+            // here lets the caller's catch record it as Failed with the reason.
+            if (!MinewBindSucceeded(rawBindResponse, out var minewMessage))
+            {
+                throw new InvalidOperationException(
+                    $"Minew rejected the bind: {minewMessage}");
+            }
+        }
+
+        /// <summary>
+        /// True when a raw Minew response carries code 200.
+        /// </summary>
+        private static bool MinewBindSucceeded(string rawResponse, out string message)
+        {
+            message = null;
+            if (string.IsNullOrWhiteSpace(rawResponse))
+            {
+                message = "empty response";
+                return false;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(rawResponse);
+
+                if (doc.RootElement.TryGetProperty("msg", out var msgEl))
+                    message = msgEl.GetString();
+                else if (doc.RootElement.TryGetProperty("message", out var msgEl2))
+                    message = msgEl2.GetString();
+
+                if (doc.RootElement.TryGetProperty("code", out var codeEl))
+                {
+                    if (codeEl.ValueKind == JsonValueKind.Number && codeEl.TryGetInt32(out var c))
+                        return c == 200;
+                    if (codeEl.ValueKind == JsonValueKind.String &&
+                        int.TryParse(codeEl.GetString(), out var cs))
+                        return cs == 200;
+                }
+
+                // No code field - do not block on a shape we do not recognise.
+                return true;
+            }
+            catch (JsonException)
+            {
+                message = "unreadable response";
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Minew wants the picture as a bare base64 string; messages are stored
+        /// as data URIs, and sending the prefix leaves the label imageless.
+        /// </summary>
+        private static string ToBareBase64(string content)
+        {
+            if (string.IsNullOrWhiteSpace(content)) return content;
+
+            if (content.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                var marker = content.IndexOf("base64,", StringComparison.OrdinalIgnoreCase);
+                if (marker > 0) return content[(marker + 7)..].Trim();
+            }
+
+            return content.Trim();
         }
 
         private bool IsValidBase64(string base64String)
@@ -1288,7 +1455,8 @@ namespace TERMS_LOYALTY_API.Repository
         }
         private async Task ValidateLocationAsync(string locationType, long locationId)
         {
-            switch (locationType)
+            // Accept any casing; callers send "Product" as readily as "PRODUCT".
+            switch (locationType?.Trim().ToUpperInvariant())
             {
                 case "PRODUCT":
                     var product = await _context.ProductMaster.FindAsync(locationId);
@@ -1312,7 +1480,8 @@ namespace TERMS_LOYALTY_API.Repository
             if (!locationId.HasValue)
                 return "Unknown Location";
 
-            switch (locationType)
+            // Any casing - an assignment-sourced queue stores "Product".
+            switch (locationType?.Trim().ToUpperInvariant())
             {
                 case "PRODUCT":
                     var product = await _context.ProductMaster.FindAsync(locationId.Value);

@@ -24,7 +24,7 @@ namespace TERMS_LOYALTY_API.Controllers
 {
     [Route("api/products")]
     [ApiController]
-    //[Authorize]
+    [Authorize]
 
     public class ProductsController : ControllerBase
     {
@@ -89,6 +89,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Create a new product.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("product")]
         [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 400)]
@@ -193,6 +194,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Update existing product.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("product/{id}")]
         [ProducesResponseType(typeof(HttpResponseData<UpdateProductResponse>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<UpdateProductResponse>), 400)]
@@ -280,6 +282,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// (bad category, invalid device, etc.) nothing is saved, instead of the
         /// product ending up half-configured.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("with-esl")]
         [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 400)]
@@ -293,6 +296,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// Update a product together with all of its ESL device+template/message
         /// assignments in a single database transaction.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("{id}/with-esl")]
         [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 400)]
@@ -513,6 +517,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// unmatched codes are created. Each row is validated independently so one
         /// bad row doesn't block the rest of the file.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("import")]
         [ProducesResponseType(typeof(HttpResponseData<ImportProductsResultDto>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<ImportProductsResultDto>), 400)]
@@ -703,12 +708,10 @@ namespace TERMS_LOYALTY_API.Controllers
                     return;
                 }
 
-                // Check if barcode is available (required by Minew API)
-                if (string.IsNullOrEmpty(product.BarCode))
-                {
-                    _logger.LogWarning("Product {ProductId} has no barcode, cannot update in Minew", product.Id);
-                    return;
-                }
+                // No barcode guard: Minew documents barcode as optional on
+                // goods/addToStore, and the required fields on updateToStore are
+                // id, storeId and price. Skipping the push for a product without
+                // a barcode silently stranded every price edit for such products.
 
                 // Create the update request for Minew
                 var updateRequest = new MinewUpdateProductRequest
@@ -790,6 +793,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Delete an existing product.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("product/{id}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 404)]
@@ -926,6 +930,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Synchronizes products in bulk.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("sync")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 400)]
@@ -1044,6 +1049,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Create a new category
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("category")]
         [ProducesResponseType(typeof(HttpResponseData<ProductCategory>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<ProductCategory>), 400)]
@@ -1095,6 +1101,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Update an existing category
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("category/{id}")]
         [ProducesResponseType(typeof(HttpResponseData<ProductCategory>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<ProductCategory>), 404)]
@@ -1145,6 +1152,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Delete a category by Id
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("category/{id}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 400)]
@@ -1289,6 +1297,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Create a new subcategory. 
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("subcategory")]
         [ProducesResponseType(typeof(HttpResponseData<ProductSubCategory>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<ProductSubCategory>), 400)]
@@ -1347,6 +1356,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Update existing subcategory.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("subcategory/{id}")]
         [ProducesResponseType(typeof(HttpResponseData<ProductSubCategory>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<ProductSubCategory>), 404)]
@@ -1405,6 +1415,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Delete a subcategory by Id
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("subcategory/{id}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 404)]

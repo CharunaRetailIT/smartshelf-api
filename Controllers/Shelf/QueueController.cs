@@ -111,6 +111,7 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // POST: api/queue/direct
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("direct")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -173,6 +174,7 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // POST: api/queue/from-assignment
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("from-assignment")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -227,6 +229,7 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // PUT: api/queue/{id}
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("{id}")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -280,6 +283,7 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // DELETE: api/queue/{id}
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{id}")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -321,6 +325,7 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // POST: api/queue/{id}/activate
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("{id}/activate")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -362,6 +367,7 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // POST: api/queue/{id}/deactivate
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("{id}/deactivate")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 404)]

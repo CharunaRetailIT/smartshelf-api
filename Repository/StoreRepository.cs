@@ -199,21 +199,88 @@ namespace TERMS_LOYALTY_API.Repository
                 int startRow = (pageNumber - 1) * pageSize + 1;
                 int endRow = pageNumber * pageSize;
 
-                // Total count (this part is SQL 2008 safe)
-                var totalCount = await _context.StoreMaster.CountAsync();
+                // Build the predicate once so the page query and the total count
+                // always agree. Previously neither applied the filter at all, so
+                // deactivated stores (a delete is a soft delete - IsActive=false)
+                // came back in every store dropdown regardless of isActive=true.
+                var conditions = new List<string>();
+                var parameters = new List<SqlParameter>
+                {
+                    new SqlParameter("@StartRow", startRow),
+                    new SqlParameter("@EndRow", endRow)
+                };
+
+                if (filter.IsActive.HasValue)
+                {
+                    conditions.Add("IsActive = @IsActive");
+                    parameters.Add(new SqlParameter("@IsActive", filter.IsActive.Value));
+                }
+                if (!string.IsNullOrWhiteSpace(filter.SearchTerm))
+                {
+                    conditions.Add("(StoreName LIKE @SearchTerm OR StoreCode LIKE @SearchTerm OR Address LIKE @SearchTerm)");
+                    parameters.Add(new SqlParameter("@SearchTerm", "%" + filter.SearchTerm.Trim() + "%"));
+                }
+                if (!string.IsNullOrWhiteSpace(filter.StoreType))
+                {
+                    conditions.Add("StoreType = @StoreType");
+                    parameters.Add(new SqlParameter("@StoreType", filter.StoreType));
+                }
+                if (filter.IsSynced.HasValue)
+                {
+                    conditions.Add("IsSynced = @IsSynced");
+                    parameters.Add(new SqlParameter("@IsSynced", filter.IsSynced.Value));
+                }
+                if (filter.CreatedFrom.HasValue)
+                {
+                    conditions.Add("CreatedDate >= @CreatedFrom");
+                    parameters.Add(new SqlParameter("@CreatedFrom", filter.CreatedFrom.Value));
+                }
+                if (filter.CreatedTo.HasValue)
+                {
+                    conditions.Add("CreatedDate <= @CreatedTo");
+                    parameters.Add(new SqlParameter("@CreatedTo", filter.CreatedTo.Value));
+                }
+
+                // Only fixed SQL fragments are concatenated; every value is bound.
+                var whereClause = conditions.Count > 0
+                    ? "WHERE " + string.Join(" AND ", conditions)
+                    : string.Empty;
+
+                // Total count has to honour the same filter or paging lies.
+                var countQuery = _context.StoreMaster.AsQueryable();
+                if (filter.IsActive.HasValue)
+                    countQuery = countQuery.Where(s => s.IsActive == filter.IsActive.Value);
+                if (!string.IsNullOrWhiteSpace(filter.SearchTerm))
+                {
+                    var term = filter.SearchTerm.Trim();
+                    countQuery = countQuery.Where(s =>
+                        s.StoreName.Contains(term) ||
+                        s.StoreCode.Contains(term) ||
+                        s.Address.Contains(term));
+                }
+                if (!string.IsNullOrWhiteSpace(filter.StoreType))
+                    countQuery = countQuery.Where(s => s.StoreType == filter.StoreType);
+                if (filter.IsSynced.HasValue)
+                    countQuery = countQuery.Where(s => s.IsSynced == filter.IsSynced.Value);
+                if (filter.CreatedFrom.HasValue)
+                    countQuery = countQuery.Where(s => s.CreatedDate >= filter.CreatedFrom.Value);
+                if (filter.CreatedTo.HasValue)
+                    countQuery = countQuery.Where(s => s.CreatedDate <= filter.CreatedTo.Value);
+
+                var totalCount = await countQuery.CountAsync();
 
                 // SQL Server 2008 paging using ROW_NUMBER
                 var stores = await _context.StoreMaster
-                    .FromSqlRaw(@"
+                    .FromSqlRaw($@"
                 SELECT *
                 FROM (
                     SELECT *,
                            ROW_NUMBER() OVER (ORDER BY CreatedDate DESC) AS RowNum
                     FROM StoreMaster
+                    {whereClause}
                 ) T
                 WHERE RowNum BETWEEN @StartRow AND @EndRow",
-                        new SqlParameter("@StartRow", startRow),
-                        new SqlParameter("@EndRow", endRow)
+                        parameters.ToArray()
                     )
                     .AsNoTracking()
                     .ToListAsync();

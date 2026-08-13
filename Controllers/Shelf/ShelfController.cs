@@ -141,6 +141,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Creates a new shelf.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("create")]
         [ProducesResponseType(typeof(HttpResponseData<ShelfMaster>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<ShelfMaster>), 400)]
@@ -194,6 +195,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Updates an existing shelf.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("{id}")]
         [ProducesResponseType(typeof(HttpResponseData<ShelfMaster>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<ShelfMaster>), 404)]
@@ -254,6 +256,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Deletes a shelf by ID.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{id:int}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 404)]
@@ -293,6 +296,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Assigns a product to a shelf.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("{shelfId}/store/{storeId}/assign/{productId}/user/{userId}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         public async Task<IActionResult> AssignProduct(int shelfId, int storeId, int productId,int userId)
@@ -322,6 +326,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Removes a product from a shelf.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{shelfId}/store/{storeId}/remove/{productId}/user/{userId}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         public async Task<IActionResult> RemoveProduct(int shelfId, int storeId,int productId, int userId)
@@ -351,6 +356,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Assigns all products of a category to a shelf.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("{shelfId}/store/{storeId}/assign/category/{categoryId}/user/{userId}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         public async Task<IActionResult> AssignProductsByCategory(int shelfId, int storeId, int categoryId, int userId, [FromServices] IProduct productRepo)
@@ -413,6 +419,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Deletes a shelf with audit user ID.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{id}/store/{storeId}/user/{userId}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         public async Task<IActionResult> DeleteShelf(int id, int storeId, int userId)
@@ -442,6 +449,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Restores a soft-deleted shelf by ID and tracks the user performing the restoration.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpPut("{id:int}/restore/store/{storeId:int}/user/{userId:int}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 500)]

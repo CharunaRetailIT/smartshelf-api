@@ -348,12 +348,54 @@ namespace TERMS_LOYALTY_API.Repository
                         throw new ArgumentException($"Screen with ID {request.ScreenId} not found");
                 }
 
-                // Check for duplicate MAC in same store
+                // Check for duplicate MAC in same store. Only an ACTIVE device is
+                // a conflict: deleting a device is a soft delete (IsActive=false)
+                // and the list filters those out, so an unfiltered check meant a
+                // deleted device blocked its own MAC forever - invisible in the
+                // UI, yet 409 on every attempt to add it back.
                 var existingDevice = await _context.DeviceMaster
-                    .FirstOrDefaultAsync(d => d.MACAddress == request.MacAddress && d.StoreId == request.StoreId);
+                    .FirstOrDefaultAsync(d => d.MACAddress == request.MacAddress
+                        && d.StoreId == request.StoreId
+                        && d.IsActive);
 
                 if (existingDevice != null)
                     throw new InvalidOperationException($"Device with MAC {request.MacAddress} already exists in store {store.StoreName}");
+
+                // A soft-deleted row for the same MAC is revived rather than
+                // duplicated, so re-adding a device keeps its id and history
+                // instead of accumulating dead rows behind the same address.
+                var deletedDevice = await _context.DeviceMaster
+                    .Where(d => d.MACAddress == request.MacAddress
+                        && d.StoreId == request.StoreId
+                        && !d.IsActive)
+                    .OrderByDescending(d => d.Id)
+                    .FirstOrDefaultAsync();
+
+                if (deletedDevice != null)
+                {
+                    deletedDevice.Name = request.Name;
+                    deletedDevice.DeviceType = request.DeviceType;
+                    deletedDevice.StatusId = request.StatusId ?? (int)DeviceStatus.Active;
+                    deletedDevice.ScreenId = request.ScreenId ?? deletedDevice.ScreenId;
+                    deletedDevice.IPAddress = request.IpAddress ?? "";
+                    deletedDevice.NetworkName = request.NetworkName ?? "";
+                    deletedDevice.Firmware = request.Firmware ?? "";
+                    deletedDevice.Hardware = request.Hardware ?? "";
+                    deletedDevice.Battery = request.Battery ?? 100;
+                    deletedDevice.IsActive = true;
+                    deletedDevice.LastSyncTime = DateTime.UtcNow;
+                    deletedDevice.UpdatedDate = DateTime.UtcNow;
+                    deletedDevice.UpdatedUser = request.CreatedUser ?? 0;
+
+                    if (request.DeviceType == "Minew" && string.IsNullOrEmpty(deletedDevice.MinewDeviceId))
+                        deletedDevice.MinewDeviceId = request.MacAddress;
+
+                    await _context.SaveChangesAsync();
+
+                    var revived = await GetDeviceByIdAsync(deletedDevice.Id);
+                    await transaction.CommitAsync();
+                    return revived;
+                }
 
                 // Create new device
                 var device = new DeviceMaster
@@ -426,10 +468,13 @@ namespace TERMS_LOYALTY_API.Repository
                         throw new ArgumentException($"Store with ID {request.StoreId} not found");
 
                     // Check for duplicate MAC in new store
+                    // Active devices only - a soft-deleted row must not block a
+                    // MAC that is no longer in use.
                     var existingMac = await _context.DeviceMaster
                         .FirstOrDefaultAsync(d => d.MACAddress == (request.MacAddress ?? device.MACAddress)
                             && d.StoreId == request.StoreId.Value
-                            && d.Id != id);
+                            && d.Id != id
+                            && d.IsActive);
 
                     if (existingMac != null)
                         throw new InvalidOperationException($"Device with MAC {request.MacAddress ?? device.MACAddress} already exists in store {store.StoreName}");
@@ -778,10 +823,12 @@ namespace TERMS_LOYALTY_API.Repository
                         Id = d.Id,
                         Mac = d.MACAddress ?? string.Empty,
                         DeviceName = d.Name ?? string.Empty,
+                        // LEFT JOIN on an optional screen - cast so a NULL row
+                        // materialises instead of throwing.
                         ScreenSize = d.DeviceScreen.DPI,
-                        ScreenInch = d.DeviceScreen.Inch,
-                        ScreenHeight = d.DeviceScreen.Height,
-                        ScreenWidth = d.DeviceScreen.Width,
+                        ScreenInch = (decimal?)d.DeviceScreen.Inch,
+                        ScreenHeight = (int?)d.DeviceScreen.Height,
+                        ScreenWidth = (int?)d.DeviceScreen.Width,
                         ScreenColor = d.ScreenColor ?? string.Empty,
                         Status = d.Status != null ? d.Status.Name : "Unknown",
                         Battery = d.Battery,
@@ -1083,9 +1130,10 @@ namespace TERMS_LOYALTY_API.Repository
                             Id = c.Device.Id,
                             Mac = c.Device.MACAddress,
                             DeviceName = c.Device.Name,
-                            ScreenInch = c.Device.DeviceScreen.Inch,
-                            ScreenHeight = c.Device.DeviceScreen.Height,
-                            ScreenWidth = c.Device.DeviceScreen.Width,
+                            // Optional screen - same LEFT JOIN cast as above.
+                            ScreenInch = (decimal?)c.Device.DeviceScreen.Inch,
+                            ScreenHeight = (int?)c.Device.DeviceScreen.Height,
+                            ScreenWidth = (int?)c.Device.DeviceScreen.Width,
                             Status = c.Device.Status != null ? c.Device.Status.Name : "Unknown",
                             Battery = c.Device.Battery,
                             LastSeen = c.Device.LastSeen,
@@ -1161,10 +1209,12 @@ namespace TERMS_LOYALTY_API.Repository
                 Id = device.Id,
                 Mac = device.MACAddress ?? string.Empty,
                 DeviceName = device.Name ?? string.Empty,
-                ScreenSize = device.DeviceScreen.Inch,
-                ScreenInch = device.DeviceScreen.Inch,
-                ScreenHeight = device.DeviceScreen.Height,
-                ScreenWidth = device.DeviceScreen.Width,
+                // ScreenId is optional on a device, so DeviceScreen is often
+                // null - dereferencing it threw before the row could be mapped.
+                ScreenSize = device.DeviceScreen?.Inch,
+                ScreenInch = device.DeviceScreen?.Inch,
+                ScreenHeight = device.DeviceScreen?.Height,
+                ScreenWidth = device.DeviceScreen?.Width,
                 ScreenColor = device.ScreenColor ?? string.Empty,
                 Status = device.Status?.Name ?? "Unknown",
                 Battery = device.Battery,
@@ -1222,9 +1272,10 @@ namespace TERMS_LOYALTY_API.Repository
                     Mac = device.MACAddress,
                     DeviceName = device.Name,
                     ScreenSize = null, // Not in entity, or calculate from width/height if needed
-                    ScreenInch = device.DeviceScreen.Inch,
-                    ScreenHeight = device.DeviceScreen.Height,
-                    ScreenWidth = device.DeviceScreen.Width,
+                    // A device without a screen is valid; guard the join.
+                    ScreenInch = device.DeviceScreen?.Inch,
+                    ScreenHeight = device.DeviceScreen?.Height,
+                    ScreenWidth = device.DeviceScreen?.Width,
                     ScreenColor = device.ScreenColor,
                     Status = device.Status?.Name ?? string.Empty, // Assuming Status has a Name property
                     Battery = device.Battery,
@@ -3111,7 +3162,13 @@ namespace TERMS_LOYALTY_API.Repository
                         GatewayType = "Minew",
                         HardwareVersion = cloudGateway.Hardware,
                         FirmwareVersion = cloudGateway.Firmware,
-                        StatusId = cloudGateway.Mode == 1 ? 0 : 1, // 1=online, 0=offline in Minew
+                        // Minew's Mode is 1=online, 0=offline. This used to map online
+                        // to StatusId 0 - which is not a row in Status at all, so the
+                        // gateways/sync projection's inner join dropped the gateway - and
+                        // offline to 1, which is "Active". Both wrong; map to real ids.
+                        StatusId = cloudGateway.Mode == 1
+                            ? (int)DeviceStatus.Active
+                            : (int)DeviceStatus.Offline,
                         IsOnline = cloudGateway.Mode == 1,
                         LastSeen = DateTime.TryParse(cloudGateway.UpdateTime, out var parsed) ? parsed : DateTime.UtcNow,
                         LastSyncTime = DateTime.UtcNow,
@@ -3127,7 +3184,9 @@ namespace TERMS_LOYALTY_API.Repository
                     existing.Name = cloudGateway.Name ?? existing.Name;
                     existing.HardwareVersion = cloudGateway.Hardware ?? existing.HardwareVersion;
                     existing.FirmwareVersion = cloudGateway.Firmware ?? existing.FirmwareVersion;
-                    existing.StatusId = cloudGateway.Mode == 1 ? 0 : 1;
+                    existing.StatusId = cloudGateway.Mode == 1
+                        ? (int)DeviceStatus.Active
+                        : (int)DeviceStatus.Offline;
                     existing.IsOnline = cloudGateway.Mode == 1;
                     existing.LastSeen = DateTime.TryParse(cloudGateway.UpdateTime, out var parsed) ? parsed : DateTime.UtcNow;
                     existing.LastSyncTime = DateTime.UtcNow;
@@ -3312,8 +3371,9 @@ namespace TERMS_LOYALTY_API.Repository
                         DeviceId = x.device.Id,
                         DeviceName = x.device.Name,
                         DeviceMac = x.device.MACAddress,
-                        DeviceHeight = x.device.DeviceScreen.Height,
-                        DeviceWidth = x.device.DeviceScreen.Width,
+                        // Optional screen - LEFT JOIN, so cast for NULL rows.
+                        DeviceHeight = (int?)x.device.DeviceScreen.Height,
+                        DeviceWidth = (int?)x.device.DeviceScreen.Width,
                         TemplateId = template.Id,
                         TemplateName = template.Name,
                         ScreenInch = template.ScreenInch,
@@ -3453,8 +3513,9 @@ namespace TERMS_LOYALTY_API.Repository
                     DeviceMessageComboId = null,
                     DeviceId = x.device.Id,
                     DeviceName = x.device.Name,
-                    DeviceHeight = x.device.DeviceScreen.Height,
-                    DeviceWidth = x.device.DeviceScreen.Width,
+                    // Optional screen - LEFT JOIN, so cast for NULL rows.
+                    DeviceHeight = (int?)x.device.DeviceScreen.Height,
+                    DeviceWidth = (int?)x.device.DeviceScreen.Width,
                     DeviceMac = x.device.MACAddress,
                     TemplateId = x.template.Id,
                     TemplateName = x.template.Name,
@@ -3492,8 +3553,9 @@ namespace TERMS_LOYALTY_API.Repository
                     DeviceMessageComboId = x.assignment.DeviceMessageComboId,
                     DeviceId = x.device.Id,
                     DeviceName = x.device.Name,
-                    DeviceHeight = x.device.DeviceScreen.Height,
-                    DeviceWidth = x.device.DeviceScreen.Width,
+                    // Optional screen - LEFT JOIN, so cast for NULL rows.
+                    DeviceHeight = (int?)x.device.DeviceScreen.Height,
+                    DeviceWidth = (int?)x.device.DeviceScreen.Width,
                     DeviceMac = x.device.MACAddress,
                     TemplateId = null,
                     TemplateName = null,

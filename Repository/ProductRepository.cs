@@ -277,7 +277,9 @@ namespace TERMS_LOYALTY_API.Repository
                 existingProduct.MinimumPrice = dto.MinimumPrice;
                 existingProduct.MaximumPrice = dto.MaximumPrice;
                 existingProduct.Description = dto.Description;
-                existingProduct.IsActive = dto.IsActive;
+                // Only when the caller actually sent it - see UpdateProductDto.
+                if (dto.IsActive.HasValue)
+                    existingProduct.IsActive = dto.IsActive.Value;
                 existingProduct.UpdatedDate = DateTime.Now;
                 existingProduct.UpdatedUser = dto.UpdatedUser;
 

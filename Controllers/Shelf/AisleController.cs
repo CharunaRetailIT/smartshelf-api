@@ -139,6 +139,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Creates a new aisle.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("create")]
         [ProducesResponseType(typeof(HttpResponseData<AisleMaster>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<AisleMaster>), 400)]
@@ -174,6 +175,7 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // POST: api/aisle
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost]
         public async Task<ActionResult<AisleMaster>> Add([FromBody] AisleMaster aisle)
         {
@@ -205,6 +207,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Updates an existing aisle.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut]
         [ProducesResponseType(typeof(HttpResponseData<AisleMaster>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<AisleMaster>), 404)]
@@ -242,6 +245,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Deletes an aisle by ID.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{id:int}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 404)]
@@ -281,6 +285,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Deletes an aisle by ID and tracks the user performing the deletion.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{id:int}/user/{userId:int}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 500)]
@@ -311,6 +316,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Restores a soft-deleted aisle by ID and tracks the user performing the restoration.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpPut("{id:int}/restore/user/{userId:int}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 500)]
@@ -341,6 +347,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Assigns a product to an aisle.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("{aisleId:int}/assign/{productId:int}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         public async Task<IActionResult> AssignProductAsync(int aisleId, int productId)
@@ -370,6 +377,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Assigns all products from a category to an aisle.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("{aisleId:int}/store/{storeId:int}/assign/category/{categoryId:int}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         public async Task<IActionResult> AssignProductsByCategoryAsync(int aisleId, int categoryId, int storeId, [FromServices] IProduct productRepo)
@@ -405,6 +413,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Removes a product from an aisle with user tracking.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{aisleId:int}/remove/{productId:int}/user/{userId:int}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         public async Task<IActionResult> RemoveProductAsync(int aisleId, int productId, int userId)

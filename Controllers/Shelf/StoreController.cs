@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using TERMS_LOYALTY_API.DTOs.shelf;
 using TERMS_LOYALTY_API.Interface;
@@ -107,6 +108,7 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
         /// <summary>
         /// Creates a new store
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpPost]
         [ProducesResponseType(typeof(HttpResponseData<StoreMaster>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -159,22 +161,28 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
 
                 var createdStore = await _storeRepo.CreateStoreAsync(store);
 
-                // If it's a Minew store, try to sync to cloud
+                // If it's a Minew store, try to sync to cloud. A failure here does
+                // not fail the create - the row exists locally either way - but it
+                // has to be reported, or a store that never reached Minew looks
+                // indistinguishable from one that did.
+                string syncNote = string.Empty;
                 if (store.StoreType == "minew")
                 {
                     try
                     {
                         await SyncStoreToCloud(store.Id);
+                        // Re-read so the caller sees the cloud id that sync assigned.
+                        createdStore = await _storeRepo.GetStoreByIdAsync(store.Id) ?? createdStore;
                     }
                     catch (Exception syncEx)
                     {
                         _logger.LogWarning(syncEx, "Failed to sync store to cloud during creation");
-                        // Don't fail the request, just log the error
+                        syncNote = $" Cloud sync failed: {syncEx.Message}";
                     }
                 }
 
                 response.Success = true;
-                response.Message = "Store created successfully.";
+                response.Message = "Store created successfully." + syncNote;
                 response.Result = createdStore;
                 response.ResponsCode = 201;
                 return CreatedAtAction(nameof(GetStore), new { id = createdStore.Id }, response);
@@ -193,6 +201,7 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
         /// <summary>
         /// Updates an existing store
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpPut("{id}")]
         [ProducesResponseType(typeof(HttpResponseData<StoreMaster>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -288,6 +297,7 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
         /// <summary>
         /// Deletes a store (soft delete)
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{id}")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -359,6 +369,7 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
         /// <summary>
         /// Sync stores with Minew cloud
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpPost("sync")]
         [ProducesResponseType(typeof(HttpResponseData<StoreSyncResultDto>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -625,6 +636,12 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
             }
         }
 
+        /// <summary>
+        /// Pushes a local store up to the Minew cloud and records the cloud id.
+        /// Throws when the cloud rejects the call, having first marked the row
+        /// as failed - a store must never be left flagged "success" while the
+        /// cloud knows nothing about it.
+        /// </summary>
         private async Task SyncStoreToCloud(long storeId)
         {
             var store = await _storeRepo.GetStoreByIdAsync(storeId);
@@ -633,38 +650,200 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
 
             var token = await GetToken();
 
-            // This is a simplified example - adjust based on your Minew API
-            if (string.IsNullOrEmpty(store.MinewStoreId))
+            try
             {
-                // Create new store in cloud
-                var addRequest = new MinewAddStoreRequest
+                if (string.IsNullOrEmpty(store.MinewStoreId))
                 {
-                    name = store.StoreName,
-                    address = store.Address,
-                    // Add other properties
-                };
+                    // `number` is Minew's store code and is mandatory on add;
+                    // leaving it empty is why these calls used to be rejected.
+                    var addRequest = new MinewAddStoreRequest
+                    {
+                        number = !string.IsNullOrWhiteSpace(store.StoreCode)
+                            ? store.StoreCode.Trim()
+                            : $"ST{store.Id}",
+                        name = store.StoreName,
+                        address = store.Address ?? string.Empty,
+                    };
 
-                var response = await _minewService.AddStoreAsync(addRequest);
-                // Parse response and update store.MinewStoreId
+                    // Minew rejects a blank number, name or address with a
+                    // localised error (code 54029). Catch it here so the caller
+                    // gets something actionable instead.
+                    if (string.IsNullOrWhiteSpace(addRequest.address))
+                    {
+                        throw new Exception(
+                            "Minew requires an address for a cloud store. " +
+                            "Set the store's address and sync again.");
+                    }
+                    if (string.IsNullOrWhiteSpace(addRequest.name))
+                    {
+                        throw new Exception("Minew requires a store name for a cloud store.");
+                    }
+
+                    var response = await _minewService.AddStoreAsync(addRequest);
+                    EnsureMinewSucceeded(response, "add store");
+
+                    // Add may return the new id directly, or nothing useful - in
+                    // which case find it by the number we just registered.
+                    store.MinewStoreId =
+                        ExtractMinewStoreId(response)
+                        ?? await FindCloudStoreIdAsync(token, addRequest.number, store.StoreName);
+
+                    if (string.IsNullOrEmpty(store.MinewStoreId))
+                    {
+                        throw new Exception(
+                            "Minew accepted the store but no cloud id could be resolved; " +
+                            "refusing to mark it synced.");
+                    }
+                }
+                else
+                {
+                    var updateRequest = new MinewUpdateStoreRequest
+                    {
+                        id = store.MinewStoreId,
+                        name = store.StoreName,
+                        address = store.Address ?? string.Empty,
+                        active = store.IsActive ? 1 : 0,
+                    };
+
+                    var response = await _minewService.UpdateStoreAsync(updateRequest);
+                    EnsureMinewSucceeded(response, "update store");
+                }
+
+                store.IsSynced = true;
+                store.SyncStatus = "success";
+                store.LastSyncDate = DateTime.UtcNow;
+                await _storeRepo.UpdateStoreAsync(store);
             }
-            else
+            catch
             {
-                // Update existing store in cloud
-                var updateRequest = new MinewUpdateStoreRequest
-                {
-                    id = store.MinewStoreId,
-                    name = store.StoreName,
-                    address = store.Address,
-                };
-
-                var response = await _minewService.UpdateStoreAsync(updateRequest);
+                store.IsSynced = false;
+                store.SyncStatus = "failed";
+                store.LastSyncDate = DateTime.UtcNow;
+                await _storeRepo.UpdateStoreAsync(store);
+                throw;
             }
-
-            store.IsSynced = true;
-            store.SyncStatus = "success";
-            store.LastSyncDate = DateTime.UtcNow;
-            await _storeRepo.UpdateStoreAsync(store);
         }
+
+        /// <summary>
+        /// Minew signals failure in the body (code != 200) rather than by HTTP
+        /// status, so an unchecked response reads as success.
+        /// </summary>
+        private static void EnsureMinewSucceeded(string rawResponse, string operation)
+        {
+            if (string.IsNullOrWhiteSpace(rawResponse))
+                throw new Exception($"Minew {operation} returned an empty response.");
+
+            int? code = null;
+            string message = null;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(rawResponse);
+                if (doc.RootElement.TryGetProperty("code", out var codeEl))
+                {
+                    if (codeEl.ValueKind == JsonValueKind.Number && codeEl.TryGetInt32(out var c))
+                        code = c;
+                    else if (codeEl.ValueKind == JsonValueKind.String &&
+                             int.TryParse(codeEl.GetString(), out var cs))
+                        code = cs;
+                }
+                if (doc.RootElement.TryGetProperty("msg", out var msgEl))
+                    message = msgEl.GetString();
+            }
+            catch (JsonException)
+            {
+                throw new Exception(
+                    $"Minew {operation} returned an unreadable response: {Truncate(rawResponse)}");
+            }
+
+            if (code != 200)
+            {
+                throw new Exception(
+                    $"Minew {operation} failed (code {code?.ToString() ?? "none"}): " +
+                    $"{message ?? Truncate(rawResponse)}");
+            }
+        }
+
+        /// <summary>
+        /// Digs the created store's id out of an add response. The payload shape
+        /// varies (bare id, object, or single-element array), so try each.
+        /// </summary>
+        private static string ExtractMinewStoreId(string rawResponse)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(rawResponse);
+                if (!doc.RootElement.TryGetProperty("data", out var data))
+                    return null;
+
+                switch (data.ValueKind)
+                {
+                    case JsonValueKind.String:
+                        return NullIfBlank(data.GetString());
+                    case JsonValueKind.Number:
+                        return data.GetRawText();
+                    case JsonValueKind.Object:
+                        return data.TryGetProperty("id", out var idEl)
+                            ? NullIfBlank(idEl.ValueKind == JsonValueKind.String
+                                ? idEl.GetString()
+                                : idEl.GetRawText())
+                            : null;
+                    case JsonValueKind.Array:
+                        foreach (var item in data.EnumerateArray())
+                        {
+                            if (item.ValueKind == JsonValueKind.Object &&
+                                item.TryGetProperty("id", out var arrId))
+                            {
+                                return NullIfBlank(arrId.ValueKind == JsonValueKind.String
+                                    ? arrId.GetString()
+                                    : arrId.GetRawText());
+                            }
+                        }
+                        return null;
+                    default:
+                        return null;
+                }
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Fallback when add does not echo the id: list the cloud's stores and
+        /// match on the number we registered, then on name.
+        /// </summary>
+        private async Task<string> FindCloudStoreIdAsync(string token, string number, string name)
+        {
+            try
+            {
+                var listed = await _minewService.GetStoresAsync(token);
+                var items = listed?.data;
+                if (items == null || items.Count == 0)
+                    return null;
+
+                var match =
+                    items.FirstOrDefault(s =>
+                        !string.IsNullOrEmpty(number) &&
+                        string.Equals(s.name, number, StringComparison.OrdinalIgnoreCase))
+                    ?? items.FirstOrDefault(s =>
+                        string.Equals(s.name, name, StringComparison.OrdinalIgnoreCase));
+
+                return NullIfBlank(match?.id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not list Minew stores to resolve the new store id");
+                return null;
+            }
+        }
+
+        private static string NullIfBlank(string value) =>
+            string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        private static string Truncate(string value) =>
+            value.Length <= 300 ? value : value.Substring(0, 300) + "...";
 
         private async Task<string> GetToken()
         {

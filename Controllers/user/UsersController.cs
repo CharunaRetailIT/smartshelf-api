@@ -21,7 +21,7 @@ namespace TERMS_LOYALTY_API.Controllers
 {
     [Route("api/user")]
     [ApiController]
-    //[Authorize]
+    [Authorize]
     public class UsersController : ControllerBase
     {
         private readonly SmartShelfDbContext _db;
@@ -41,7 +41,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// Retrieves all users.
         /// </summary>
         [HttpGet]
-        //[Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
         public async Task<IActionResult> GetAll()
@@ -121,7 +121,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// Retrieves a user by ID.
         /// </summary>
         [HttpGet("{id}")]
-        //[Authorize(Roles = "Admin,Manager")]
+        [Authorize(Roles = "Admin,Manager")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -178,6 +178,8 @@ namespace TERMS_LOYALTY_API.Controllers
         [HttpPut("{userId?}")]
         [ProducesResponseType(typeof(HttpResponseData<User>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<User>), 400)]
+        [ProducesResponseType(typeof(HttpResponseData<User>), 401)]
+        [ProducesResponseType(typeof(HttpResponseData<User>), 403)]
         [ProducesResponseType(typeof(HttpResponseData<User>), 404)]
         [ProducesResponseType(typeof(HttpResponseData<User>), 500)]
         public async Task<IActionResult> UpdateUser(int? userId, [FromBody] UpdateUserDto dto)
@@ -189,6 +191,25 @@ namespace TERMS_LOYALTY_API.Controllers
                 response.Message = "Valid User ID is required";
                 response.ResponsCode = 400;
                 return BadRequest(response);
+            }
+
+            // An Admin may edit any user; everyone else may edit only their own record.
+            var callerId = CurrentUserId;
+            if (!callerId.HasValue)
+            {
+                response.Success = false;
+                response.Message = "Unauthorized";
+                response.ResponsCode = 401;
+                return Unauthorized(response);
+            }
+
+            if (!User.IsInRole("Admin") && callerId.Value != userId.Value)
+            {
+                _logger.LogWarning($"User {callerId.Value} attempted to update user ID {userId}");
+                response.Success = false;
+                response.Message = "You can only update your own profile";
+                response.ResponsCode = 403;
+                return StatusCode(403, response);
             }
 
             try
@@ -234,7 +255,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// Assigns a role to a user.
         /// </summary>
         [HttpPost("assign-role")]
-        //[Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin")]
         [ProducesResponseType(typeof(HttpResponseData<string>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<string>), 400)]
         [ProducesResponseType(typeof(HttpResponseData<string>), 404)]
@@ -450,6 +471,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// Deletes (deactivates) a user by ID.
         /// </summary>
         [HttpDelete("{id}")]
+        [Authorize(Roles = "Admin")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 404)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 400)]
@@ -505,6 +527,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// Restores (reactivates) a user by ID.
         /// </summary>
         [HttpPut("{id}/restore")]
+        [Authorize(Roles = "Admin")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 404)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 400)]

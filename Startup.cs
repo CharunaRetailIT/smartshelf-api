@@ -128,7 +128,9 @@ namespace TERMS_MOBILE_WEB_API
                 {
                     builder
                         .WithOrigins(
-                            "http://127.0.0.1:5500",     // Live Server
+                            "http://20.212.176.38:8085",     // Live Server
+                            "https://esl.retailit.lk",
+                            "http://localhost:8085",      // Angular dev server (this app)
                             "http://localhost:5500",      // Live Server alternative
                             "http://localhost:5173",     //react web
                             "http://localhost:4200",      // Angular dev server
@@ -277,16 +279,14 @@ namespace TERMS_MOBILE_WEB_API
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
-
-                //After Publish Remov
-                app.UseSwagger();
-                //app.UseSwaggerUI();
-                app.UseSwaggerUI(c =>
-                {
-                    c.SwaggerEndpoint("/swagger/v1/swagger.json", "TERMS_MOBILE_WEB_API v1");
-                    c.RoutePrefix = "swagger"; // optional, default
-                });
             }
+
+            app.UseSwagger();
+            app.UseSwaggerUI(c =>
+            {
+                c.SwaggerEndpoint("/swagger/v1/swagger.json", "TERMS_MOBILE_WEB_API v1");
+                c.RoutePrefix = "swagger"; // optional, default
+            });
 
             //app.UseCors("AngularPolicy");
 
@@ -299,6 +299,18 @@ namespace TERMS_MOBILE_WEB_API
             app.UseStaticFiles();
             app.UseEndpoints(endpoints =>
             {
+                // A published app never reads launchSettings.json, so its
+                // launchUrl ("swagger") only applies when debugging locally and
+                // the deployed site root just 404s - wwwroot has no index page.
+                // Send the root to the Swagger UI instead. PathBase is included
+                // so this still works when hosted under an IIS virtual
+                // directory rather than at the site root.
+                endpoints.MapGet("/", context =>
+                {
+                    context.Response.Redirect($"{context.Request.PathBase}/swagger");
+                    return Task.CompletedTask;
+                });
+
                 endpoints.MapHub<DeviceAssignmentHub>("/deviceHub");
                 endpoints.MapControllers();
             });

@@ -33,8 +33,11 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
     }
     public class CreateDeviceRequest
     {
+        // Minew labels report a bare 12-hex MAC (e1000005e79d) and that is what
+        // the cloud and every existing DeviceMaster row use; the separated form
+        // stays valid for hardware entered by hand.
         [MaxLength(50)]
-        [RegularExpression(@"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$",
+        [RegularExpression(@"^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$|^[0-9A-Fa-f]{12}$",
             ErrorMessage = "Invalid MAC address format")]
         public string MacAddress { get; set; }
 
@@ -51,8 +54,10 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
 
         public long? ScreenId { get; set; }
 
+        // A Minew device has no IP, and the form posts "" rather than omitting
+        // the field - an empty string fails a bare regex, so allow it here.
         [MaxLength(50)]
-        [RegularExpression(@"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$",
+        [RegularExpression(@"^$|^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$",
             ErrorMessage = "Invalid IP address format")]
         public string IpAddress { get; set; }
 
@@ -80,8 +85,11 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
     {
         public long Id { get; set; }
 
+        // Minew labels report a bare 12-hex MAC (e1000005e79d) and that is what
+        // the cloud and every existing DeviceMaster row use; the separated form
+        // stays valid for hardware entered by hand.
         [MaxLength(50)]
-        [RegularExpression(@"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$",
+        [RegularExpression(@"^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$|^[0-9A-Fa-f]{12}$",
             ErrorMessage = "Invalid MAC address format")]
         public string MacAddress { get; set; }
 
@@ -95,8 +103,10 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
 
         public long? ScreenId { get; set; }
 
+        // A Minew device has no IP, and the form posts "" rather than omitting
+        // the field - an empty string fails a bare regex, so allow it here.
         [MaxLength(50)]
-        [RegularExpression(@"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$",
+        [RegularExpression(@"^$|^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$",
             ErrorMessage = "Invalid IP address format")]
         public string IpAddress { get; set; }
 

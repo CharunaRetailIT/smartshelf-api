@@ -17,8 +17,28 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
         public string ShelfName { get; set; }
         public string TemplateName { get; set; }
         public string MessageTitle { get; set; }
-        public DateTime StartDate { get; set; }
-        public DateTime? EndDate { get; set; }
+
+        // Queue windows are stored in UTC: the client posts an ISO string in UTC
+        // and QueueProcessorService compares against DateTime.UtcNow. EF returns
+        // them with Kind=Unspecified, which serialises with no 'Z', so the
+        // browser parsed them as local time and showed a queue 5h30m early.
+        // Stamping the Kind makes the JSON explicit so clients convert properly.
+        private DateTime _startDate;
+        private DateTime? _endDate;
+
+        public DateTime StartDate
+        {
+            get => DateTime.SpecifyKind(_startDate, DateTimeKind.Utc);
+            set => _startDate = value;
+        }
+
+        public DateTime? EndDate
+        {
+            get => _endDate.HasValue
+                ? DateTime.SpecifyKind(_endDate.Value, DateTimeKind.Utc)
+                : (DateTime?)null;
+            set => _endDate = value;
+        }
         public string Status { get; set; }
         public string Priority { get; set; }
         public bool IsActive { get; set; }

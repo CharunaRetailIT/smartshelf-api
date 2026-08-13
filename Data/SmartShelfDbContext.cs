@@ -20,6 +20,7 @@ namespace TERMS_LOYALTY_API.Data
 
         public DbSet<MessageMaster> MessageMaster { get; set; }
         public DbSet<QueueMaster> QueueMaster { get; set; }
+        public DbSet<QueueExecutionLog> QueueExecutionLog { get; set; }
         public DbSet<ContentType> ContentType { get; set; }
 
         public DbSet<StoreMaster> StoreMaster { get; set; }

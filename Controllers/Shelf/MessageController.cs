@@ -228,6 +228,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Create a general message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("general")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 201)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -260,6 +261,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Upload an image message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("image")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -300,6 +302,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Upload a video message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("video")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -340,6 +343,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Create a custom image message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("custom-image")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -386,6 +390,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Update general message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("{id:long}")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -424,6 +429,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Update general message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("general/{id:long}")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -462,6 +468,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Update image message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("image/{id:long}")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -493,6 +500,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Update video message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("video/{id:long}")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -524,6 +532,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Update custom message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("custom-image/{id:long}")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -562,6 +571,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// DeleteDelete a message.
         /// </summary>
+        [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{id:long}")]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<bool>), 404)]

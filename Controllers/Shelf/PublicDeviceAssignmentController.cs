@@ -141,8 +141,9 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                         DeviceId = da.DeviceMessageCombo.DeviceId,
                         DeviceName = da.DeviceMessageCombo.Device.Name,
                         DeviceMac = da.DeviceMessageCombo.Device.MACAddress,
-                        DeviceScreenWidth = da.DeviceMessageCombo.Device.DeviceScreen.Width,
-                        DeviceScreenHeight = da.DeviceMessageCombo.Device.DeviceScreen.Height,
+                        // Optional screen - LEFT JOIN, so cast for NULL rows.
+                        DeviceScreenWidth = (int?)da.DeviceMessageCombo.Device.DeviceScreen.Width,
+                        DeviceScreenHeight = (int?)da.DeviceMessageCombo.Device.DeviceScreen.Height,
                         DeviceOrientation = da.DeviceMessageCombo.Device.DeviceScreen.AspectRatio,
                         MessageId = da.DeviceMessageCombo.MessageId,
                         MessageTitle = da.DeviceMessageCombo.Message.Title,

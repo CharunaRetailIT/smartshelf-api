@@ -264,7 +264,11 @@ namespace TERMS_LOYALTY_API.Services
                 json,
                 new JsonSerializerOptions
                 {
-                    PropertyNameCaseInsensitive = true
+                    PropertyNameCaseInsensitive = true,
+                    // Minew quotes numbers inconsistently between fields and
+                    // firmware versions; without this a single "100" instead of
+                    // 100 fails the whole device list.
+                    NumberHandling = JsonNumberHandling.AllowReadingFromString,
                 });
         }
 
@@ -283,7 +287,24 @@ namespace TERMS_LOYALTY_API.Services
             if (!response.IsSuccessStatusCode)
                 throw new Exception($"Light up failed: {result}");
 
-            return JsonSerializer.Deserialize<dynamic>(result);
+            // Minew answers some requests (an unknown MAC, for one) with HTTP 200
+            // and an empty body. Deserialising that threw a raw parser error -
+            // "The input does not contain any JSON tokens" - which surfaced as a
+            // 500 and told the operator nothing.
+            if (string.IsNullOrWhiteSpace(result))
+                throw new Exception(
+                    "Minew returned an empty response - the label may not exist in this store.");
+
+            try
+            {
+                return JsonSerializer.Deserialize<dynamic>(result);
+            }
+            catch (JsonException)
+            {
+                throw new Exception(
+                    $"Minew returned an unreadable response: " +
+                    (result.Length <= 200 ? result : result.Substring(0, 200) + "..."));
+            }
         }
 
         public async Task<dynamic> GetDeviceStatus(string token, string storeId, string mac)
@@ -460,6 +481,42 @@ namespace TERMS_LOYALTY_API.Services
         //            PropertyNameCaseInsensitive = true
         //        });
         //}
+
+        /// <summary>
+        /// Returns the merchant's dynamic field ids (apis/esl/scene/findDongTaiZiDuan).
+        ///
+        /// A goodsMap key must be the id of the field a template element is bound
+        /// to - "image" is not a universal key, and Minew silently ignores any key
+        /// it does not recognise, so a picture sent under the wrong one just never
+        /// appears on the label.
+        /// </summary>
+        public async Task<List<MinewDynamicField>> GetDynamicFieldsAsync(string token)
+        {
+            await EnsureTokenAsync();
+            SetTokenHeaders(token);
+
+            var response = await _http.PostAsync(
+                "apis/esl/scene/findDongTaiZiDuan",
+                new StringContent("{}", Encoding.UTF8, "application/json"));
+
+            var json = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode || string.IsNullOrWhiteSpace(json))
+                throw new Exception($"Could not read Minew dynamic fields: {json}");
+
+            var parsed = JsonSerializer.Deserialize<MinewDynamicFieldResponse>(
+                json,
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                    NumberHandling = JsonNumberHandling.AllowReadingFromString,
+                });
+
+            if (parsed == null || parsed.Code != 200)
+                throw new Exception($"Minew dynamic fields failed: {parsed?.Msg ?? json}");
+
+            return parsed.Data ?? new List<MinewDynamicField>();
+        }
 
         public async Task<T> GetFromMinewAsync<T>(string token, string url) where T : class
         {
@@ -1006,6 +1063,22 @@ namespace TERMS_LOYALTY_API.Services
     }
 
 
+    public class MinewDynamicFieldResponse
+    {
+        public int Code { get; set; }
+        public string Msg { get; set; }
+        public List<MinewDynamicField> Data { get; set; }
+    }
+
+    /// <summary>One user-defined goodsMap field as Minew defines it.</summary>
+    public class MinewDynamicField
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public int? Number { get; set; }
+        public int? ColunmDataType { get; set; }
+    }
+
     public class MinewDeviceResponse
     {
         public int Code { get; set; }
@@ -1019,7 +1092,13 @@ namespace TERMS_LOYALTY_API.Services
         public string Mac { get; set; }
         public string remark { get; set; }
         public string ScreenSize { get; set; }
-        public int Battery { get; set; }
+        // Minew has been seen returning this as a quoted string (and it can
+        // be absent entirely), which broke deserialisation of the whole
+        // device list with "The JSON value could not be converted to
+        // System.Int32". Nullable + AllowReadingFromString accepts 100,
+        // "100" and null alike. Every consumer stores it in an int? anyway.
+        [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+        public int? Battery { get; set; }
         public string Firmware { get; set; }
         public string Hardware { get; set; }
         public string IsOnline { get; set; }
