@@ -18,7 +18,6 @@ namespace TERMS_LOYALTY_API.Interface
         Task<PagedResult<object>> GetStoreDetailsAsync(StoreFilterDto filter);
         Task<StoreMaster> GetStoreByMinewID(string Id);
         Task<StoreMaster?> GetStoreByProductIdAsync(long productId);
-        Task<int> SyncMinewStoresAsync(string token, int active = 1, string? condition = null);
 
     }
 }

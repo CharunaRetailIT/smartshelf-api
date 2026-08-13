@@ -1,5 +1,6 @@
 ﻿
 using System.ComponentModel.DataAnnotations.Schema;
+using TERMS_LOYALTY_API.Models.shelf;
 
 namespace TERMS_LOYALTY_API.Models.user
 {
@@ -13,6 +14,7 @@ namespace TERMS_LOYALTY_API.Models.user
         public int? RoleId { get; set; } // Foreign key for Role
         public string Email { get; set; } = "";
         public int? DepartmentId { get; set; }
+        public long? StoreId { get; set; }
         public string? ProfileImagePath { get; set; }
 
         public string? Address1 { get; set; }
@@ -26,5 +28,6 @@ namespace TERMS_LOYALTY_API.Models.user
 
         public virtual Role Role { get; set; } = null!;
         public virtual Department Department { get; set; } = null!;
+        public virtual StoreMaster? Store { get; set; }
     }
 }

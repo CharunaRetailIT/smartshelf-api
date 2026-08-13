@@ -1,8 +1,14 @@
-﻿namespace TERMS_LOYALTY_API.Models.DTOs.user
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace TERMS_LOYALTY_API.Models.DTOs.user
 {
     public class RegisterDto
     {
         public string EmployeeId { get; set; } = "";  // login ID
+
+        [Required]
+        [Range(1, long.MaxValue, ErrorMessage = "A store must be selected")]
+        public long StoreId { get; set; }
 
         public int? RoleId { get; set; } = 4; // Default role ID for User, can be set to 1 for Admin if needed
         public string Password { get; set; } = "";

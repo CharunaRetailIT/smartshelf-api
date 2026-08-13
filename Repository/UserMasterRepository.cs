@@ -147,6 +147,7 @@ namespace TERMS_MOBILE_WEB_API.Repository
             return await _context.Users
                        .Include(u => u.Role)
                        .Include(u => u.Department)
+                       .Include(u => u.Store)
                        .FirstOrDefaultAsync(u => u.Id == userId);
         }
 

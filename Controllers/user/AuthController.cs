@@ -61,6 +61,14 @@ namespace TERMS_LOYALTY_API.Controllers
                     return BadRequest(response);
                 }
 
+                if (!await _db.StoreMaster.AnyAsync(s => s.Id == dto.StoreId && s.IsActive))
+                {
+                    response.Success = false;
+                    response.Message = "Selected store does not exist or is inactive";
+                    response.ResponsCode = 400;
+                    return BadRequest(response);
+                }
+
                 var user = new User
                 {
                     FirstName = dto.FirstName,
@@ -69,6 +77,7 @@ namespace TERMS_LOYALTY_API.Controllers
                     EmployeeId = dto.EmployeeId,
                     Email = dto.Email,
                     DepartmentId = dto.Department,
+                    StoreId = dto.StoreId,
                     RoleId = dto.RoleId.HasValue ? dto.RoleId.Value : 4, // Default role = User
                     IsActive = true,
                     CreatedDate = DateTime.UtcNow
@@ -84,7 +93,8 @@ namespace TERMS_LOYALTY_API.Controllers
                 {
                     user.Id,
                     user.EmployeeId,
-                    user.Email
+                    user.Email,
+                    user.StoreId
                 };
                 response.ResponsCode = 200;
                 return Ok(response);
@@ -114,6 +124,7 @@ namespace TERMS_LOYALTY_API.Controllers
             try
             {
                 var user = await _db.Users.Include(u => u.Role)
+                                          .Include(u => u.Store)
                                           .FirstOrDefaultAsync(u => u.EmployeeId == dto.UserName);
 
                 if (user == null)
@@ -150,6 +161,27 @@ namespace TERMS_LOYALTY_API.Controllers
                         user.Email,
                         user.DepartmentId,
                         user.ProfileImagePath,
+                        user.StoreId,
+                        store = user.Store == null ? null : new
+                        {
+                            user.Store.Id,
+                            user.Store.StoreName,
+                            user.Store.StoreCode,
+                            user.Store.Address,
+                            user.Store.Phone,
+                            user.Store.Email,
+                            user.Store.ContactPerson,
+                            user.Store.StoreType,
+                            user.Store.MinewStoreId,
+                            user.Store.Latitude,
+                            user.Store.Longitude,
+                            user.Store.IsActive,
+                            user.Store.IsSynced,
+                            user.Store.LastSyncDate,
+                            user.Store.SyncStatus,
+                            user.Store.CreatedDate,
+                            user.Store.UpdatedDate
+                        },
                         roles
                     }
                 };
@@ -273,7 +305,9 @@ namespace TERMS_LOYALTY_API.Controllers
                     ProfileImageUrl = Request.ToAbsoluteUrl(user.ProfileImagePath),
 
                     Role = user.Role?.Name ?? "",
-                    Department = user.Department?.Name ?? ""
+                    Department = user.Department?.Name ?? "",
+                    StoreId = user.StoreId,
+                    Store = user.Store?.StoreName ?? ""
                 };
 
                 response.Success = true;
@@ -441,6 +475,8 @@ namespace TERMS_LOYALTY_API.Controllers
                 user.Email,
                 user.DepartmentId,
                 Department = user.Department?.Name,
+                user.StoreId,
+                Store = user.Store?.StoreName,
                 user.RoleId,
                 Role = user.Role?.Name,
                 ProfileImageUrl = string.IsNullOrEmpty(user.ProfileImagePath)

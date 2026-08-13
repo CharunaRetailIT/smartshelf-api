@@ -10,6 +10,8 @@
         public string Email { get; set; }
         public int DepartmentId { get; set; }
         public string Department { get; set; }
+        public long? StoreId { get; set; }
+        public string Store { get; set; }
         public int RoleId { get; set; }
         public string Role { get; set; }
         public string ProfileImageUrl { get; set; }

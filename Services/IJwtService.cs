@@ -44,6 +44,7 @@ namespace TERMS_LOYALTY_API.Services
                 new Claim("firstName", user.FirstName),
                 new Claim("lastName", user.LastName),
                 new Claim("departmentId", user.DepartmentId.ToString() ?? ""),
+                new Claim("storeId", user.StoreId?.ToString() ?? ""),
                 new Claim("profileImageUrl", profileImageUrl ?? ""),
                 new Claim("role", user.Role?.Name ?? "User")
             };

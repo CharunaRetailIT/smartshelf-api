@@ -28,9 +28,10 @@ namespace TERMS_LOYALTY_API.Models.shelf
         [StringLength(100)]
         public string ContactPerson { get; set; }
 
-        // Store type: "minew" or "local"
+        // Vestigial: every store is created locally and published to Minew, so
+        // this is always "minew". Kept because existing rows and queries use it.
         [StringLength(20)]
-        public string StoreType { get; set; } = "local";
+        public string StoreType { get; set; } = "minew";
 
         // For Minew stores only
         [StringLength(100)]

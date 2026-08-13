@@ -1093,25 +1093,7 @@ namespace TERMS_LOYALTY_API.Repository
             // Case-insensitive: queues created from an assignment carry the
             // assignment's own casing ("Product"), and a case-sensitive compare
             // silently skipped the real data.
-            var locationType = queue.LocationType?.Trim().ToUpperInvariant();
-
-            Dictionary<string, string> goodsMap = null;
-            if (locationType == "PRODUCT" && queue.ProductId.HasValue)
-            {
-                var product = await _context.ProductMaster.FindAsync(queue.ProductId.Value);
-                if (product != null)
-                {
-                    goodsMap = GenerateGoodsMapFromProduct(product);
-                }
-            }
-            else if (locationType == "SHELF" && queue.ShelfId.HasValue)
-            {
-                var shelf = await _context.ShelfMaster.FindAsync(queue.ShelfId.Value);
-                if (shelf != null)
-                {
-                    goodsMap = GenerateShelfGoodsMap(shelf);
-                }
-            }
+            var goodsMap = await ResolveQueueGoodsMap(queue);
 
             // Binding a placeholder pushes id "0" with a 0.00 price, which Minew
             // either rejects (数据不存在) or renders as an empty label. Either way
@@ -1313,8 +1295,7 @@ namespace TERMS_LOYALTY_API.Repository
                 switch (queue.Device.DeviceType)
                 {
                     case "Minew":
-                        // For Minew, we could send a blank template or default display
-                        // This depends on your Minew API capabilities
+                        await RestoreMinewDefaultDisplay(queue);
                         break;
 
                     case "Standard":
@@ -1333,6 +1314,124 @@ namespace TERMS_LOYALTY_API.Repository
                 _logger.LogError(ex, $"Error deactivating display for queue {queue.Id}");
                 // Don't throw - this is a cleanup operation
             }
+        }
+
+        /// <summary>
+        /// Takes a finished queue's content off the label. A Minew label holds
+        /// whatever was last written to it, so without this the promo stayed up
+        /// forever once EndDate passed.
+        ///
+        /// Re-binds the queue's own product/shelf on the device's default
+        /// template - same content, promo template and message image dropped.
+        /// When there is nothing to fall back to (no default template, or a
+        /// queue whose location resolves to no content) the label is unbound
+        /// instead, which blanks it - better than leaving a stale promo up.
+        /// </summary>
+        private async Task RestoreMinewDefaultDisplay(QueueMaster queue)
+        {
+            var device = queue.Device;
+            var store = await _context.StoreMaster.FindAsync(device.StoreId);
+
+            if (store == null || string.IsNullOrEmpty(store.MinewStoreId))
+            {
+                _logger.LogWarning(
+                    $"Queue {queue.Id}: store {device.StoreId} has no Minew id, " +
+                    "cannot clear or restore the label.");
+                return;
+            }
+
+            var token = await GetToken();
+
+            // The device's standing template. Same resolution the manual bind
+            // path uses - explicit default first, then highest priority - plus
+            // a newest-first tiebreak, because no combo in this database is
+            // actually flagged IsDefault and several devices have multiple
+            // active combos all at priority 0. Without the tiebreak the label
+            // would revert to whichever row SQL happened to return first, and
+            // could differ between runs.
+            var defaultCombo = await _context.DeviceTemplateCombos
+                .Where(c => c.DeviceId == device.Id && c.IsActive)
+                .OrderByDescending(c => c.IsDefault)
+                .ThenByDescending(c => c.Priority)
+                .ThenByDescending(c => c.Id)
+                .FirstOrDefaultAsync();
+
+            var goodsMap = await ResolveQueueGoodsMap(queue);
+
+            if (defaultCombo == null || goodsMap == null)
+            {
+                var reason = defaultCombo == null
+                    ? "device has no active template combo"
+                    : "queue resolved to no bindable content";
+
+                _logger.LogInformation(
+                    $"Queue {queue.Id}: {reason}, unbinding label {device.MACAddress}.");
+
+                await _minewService.UnbindDeviceAsync(device.MACAddress, store.MinewStoreId);
+                return;
+            }
+
+            // Deliberately no goodsMap["image"] - dropping the message is the
+            // whole point of ending a message queue.
+            var bindRequest = new
+            {
+                storeId = store.MinewStoreId,
+                labelMac = device.MACAddress,
+                goodsMap = goodsMap,
+                demoIdMap = new Dictionary<string, string> { ["A"] = defaultCombo.TemplateId },
+                color = 1,
+                total = 5,
+                period = 500,
+                interval = 900,
+                brightness = 100,
+                opCode = new Random().Next(1000000000, 2000000000)
+            };
+
+            var response = await _minewService.BindData(token, bindRequest);
+            var rawResponse = response?.RootElement.GetRawText() ?? string.Empty;
+
+            // Minew reports failure in the body, not the HTTP status. A silent
+            // failure here would leave the expired promo on the shelf, so fall
+            // back to unbinding - a blank label beats a stale one.
+            if (!MinewBindSucceeded(rawResponse, out var minewMessage))
+            {
+                _logger.LogWarning(
+                    $"Queue {queue.Id}: reverting label {device.MACAddress} to template " +
+                    $"{defaultCombo.TemplateId} failed ({minewMessage}); unbinding instead.");
+
+                await _minewService.UnbindDeviceAsync(device.MACAddress, store.MinewStoreId);
+                return;
+            }
+
+            _logger.LogInformation(
+                $"Queue {queue.Id}: label {device.MACAddress} reverted to template " +
+                $"{defaultCombo.TemplateId}.");
+        }
+
+        /// <summary>
+        /// The product or shelf payload a queue points at, or null when it
+        /// points at nothing bindable.
+        /// </summary>
+        private async Task<Dictionary<string, string>> ResolveQueueGoodsMap(QueueMaster queue)
+        {
+            // Case-insensitive: queues created from an assignment carry the
+            // assignment's own casing ("Product"), and a case-sensitive compare
+            // silently skipped the real data.
+            var locationType = queue.LocationType?.Trim().ToUpperInvariant();
+
+            if (locationType == "PRODUCT" && queue.ProductId.HasValue)
+            {
+                var product = await _context.ProductMaster.FindAsync(queue.ProductId.Value);
+                return product == null ? null : GenerateGoodsMapFromProduct(product);
+            }
+
+            if (locationType == "SHELF" && queue.ShelfId.HasValue)
+            {
+                var shelf = await _context.ShelfMaster.FindAsync(queue.ShelfId.Value);
+                return shelf == null ? null : GenerateShelfGoodsMap(shelf);
+            }
+
+            return null;
         }
 
         private async Task NotifyQueueUpdate(QueueMaster queue)

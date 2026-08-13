@@ -24,6 +24,12 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
 
     public class StoreController : ControllerBase
     {
+        /// <summary>
+        /// Every store is created locally and published to Minew - there is no
+        /// local-only store - so this is the type stamped on all of them.
+        /// </summary>
+        private const string MinewStoreType = "minew";
+
         private readonly IStore _storeRepo;
         private readonly ILogger<StoreController> _logger;
         private readonly MinewCloudService _minewService;
@@ -59,6 +65,47 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving stores");
+                response.Success = false;
+                response.Message = "Failed to retrieve stores.";
+                response.Error = ex.Message;
+                response.ResponsCode = 500;
+                return Problem(title: response.Message, detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+            }
+        }
+
+        /// <summary>
+        /// Retrieves the active stores as a minimal id/name list. Anonymous so the
+        /// registration form can populate its store picker before a user exists.
+        /// </summary>
+        [HttpGet("lookup")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(HttpResponseData<List<object>>), 200)]
+        [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
+        public async Task<IActionResult> GetStoreLookup()
+        {
+            var response = new HttpResponseData<List<object>>();
+            try
+            {
+                var stores = await _storeRepo.GetStoresAsync(new StoreFilterDto
+                {
+                    IsActive = true,
+                    PageNumber = 1,
+                    PageSize = 1000,
+                    SortBy = "StoreName",
+                    SortDirection = "asc"
+                });
+
+                response.Success = true;
+                response.Message = "Stores retrieved successfully.";
+                response.Result = stores.Items
+                    .Select(s => (object)new { s.Id, s.StoreName, s.StoreCode })
+                    .ToList();
+                response.ResponsCode = 200;
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving store lookup");
                 response.Success = false;
                 response.Message = "Failed to retrieve stores.";
                 response.Error = ex.Message;
@@ -147,38 +194,35 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                     Phone = storeDto.Phone,
                     Email = storeDto.Email,
                     ContactPerson = storeDto.ContactPerson,
-                    StoreType = storeDto.StoreType,
+                    StoreType = MinewStoreType,
                     MinewStoreId = storeDto.MinewStoreId,
                     LegacyStoreId = null,
                     Latitude = storeDto.Latitude,
                     Longitude = storeDto.Longitude,
                     IsActive = storeDto.IsActive,
-                    IsSynced = storeDto.StoreType == "minew" ? false : true,
-                    SyncStatus = storeDto.StoreType == "minew" ? "pending" : "not_required",
+                    IsSynced = false,
+                    SyncStatus = "pending",
                     CreatedDate = DateTime.UtcNow,
                     CreatedUser = (int)storeDto.CreatedUser
                 };
 
                 var createdStore = await _storeRepo.CreateStoreAsync(store);
 
-                // If it's a Minew store, try to sync to cloud. A failure here does
-                // not fail the create - the row exists locally either way - but it
-                // has to be reported, or a store that never reached Minew looks
+                // Every store is published to Minew. A failure here does not fail
+                // the create - the row exists locally either way - but it has to
+                // be reported, or a store that never reached Minew looks
                 // indistinguishable from one that did.
                 string syncNote = string.Empty;
-                if (store.StoreType == "minew")
+                try
                 {
-                    try
-                    {
-                        await SyncStoreToCloud(store.Id);
-                        // Re-read so the caller sees the cloud id that sync assigned.
-                        createdStore = await _storeRepo.GetStoreByIdAsync(store.Id) ?? createdStore;
-                    }
-                    catch (Exception syncEx)
-                    {
-                        _logger.LogWarning(syncEx, "Failed to sync store to cloud during creation");
-                        syncNote = $" Cloud sync failed: {syncEx.Message}";
-                    }
+                    await SyncStoreToCloud(store.Id);
+                    // Re-read so the caller sees the cloud id that sync assigned.
+                    createdStore = await _storeRepo.GetStoreByIdAsync(store.Id) ?? createdStore;
+                }
+                catch (Exception syncEx)
+                {
+                    _logger.LogWarning(syncEx, "Failed to sync store to cloud during creation");
+                    syncNote = $" Cloud sync failed: {syncEx.Message}";
                 }
 
                 response.Success = true;
@@ -248,24 +292,17 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                 store.Phone = storeDto.Phone;
                 store.Email = storeDto.Email;
                 store.ContactPerson = storeDto.ContactPerson;
-                store.StoreType = storeDto.StoreType;
+                store.StoreType = MinewStoreType;
                 store.Latitude = storeDto.Latitude;
                 store.Longitude = storeDto.Longitude;
                 store.IsActive = storeDto.IsActive;
                 store.UpdatedDate = DateTime.UtcNow;
                 store.UpdatedUser = storeDto.CreatedUser;
 
-                // If changing to minew store type, mark for sync
-                if (storeDto.StoreType == "minew" && store.StoreType != "minew")
-                {
-                    store.IsSynced = false;
-                    store.SyncStatus = "pending";
-                }
-
                 var updatedStore = await _storeRepo.UpdateStoreAsync(store);
 
-                // Sync to cloud if it's a Minew store
-                if (store.StoreType == "minew" && !store.IsSynced)
+                // Push anything not yet reflected in the cloud
+                if (!store.IsSynced)
                 {
                     try
                     {
@@ -336,8 +373,8 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                     return BadRequest(response);
                 }
 
-                // If it's a Minew store, try to delete from cloud
-                if (store.StoreType == "minew" && !string.IsNullOrEmpty(store.MinewStoreId))
+                // Close it in the cloud too, if it ever got there
+                if (!string.IsNullOrEmpty(store.MinewStoreId))
                 {
                     try
                     {
@@ -367,7 +404,8 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
         }
 
         /// <summary>
-        /// Sync stores with Minew cloud
+        /// Pushes local stores up to the Minew cloud. Sync is one-way by design:
+        /// stores are created locally and published to Minew, never pulled down.
         /// </summary>
         [Authorize(Roles = "Admin,Manager")]
         [HttpPost("sync")]
@@ -379,12 +417,6 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
             try
             {
                 var result = new StoreSyncResultDto();
-
-                // Sync from cloud to local
-                if (request.SyncFromCloud)
-                {
-                    await SyncFromCloud(result);
-                }
 
                 // Sync local stores to cloud
                 if (request.SyncToCloud)
@@ -403,37 +435,6 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                 _logger.LogError(ex, "Error syncing stores");
                 response.Success = false;
                 response.Message = "Failed to sync stores.";
-                response.Error = ex.Message;
-                response.ResponsCode = 500;
-                return Problem(title: response.Message, detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
-            }
-        }
-
-        /// <summary>
-        /// Gets stores from Minew cloud
-        /// </summary>
-        [HttpGet("minew-cloud")]
-        [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
-        [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-        public async Task<IActionResult> GetMinewCloudStores()
-        {
-            var response = new HttpResponseData<object>();
-            try
-            {
-                var token = await GetToken();
-                var cloudStores = await _minewService.GetStoresAsync(token);
-
-                response.Success = true;
-                response.Message = "Cloud stores retrieved successfully.";
-                response.Result = cloudStores;
-                response.ResponsCode = 200;
-                return Ok(response);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting cloud stores");
-                response.Success = false;
-                response.Message = "Failed to get cloud stores.";
                 response.Error = ex.Message;
                 response.ResponsCode = 500;
                 return Problem(title: response.Message, detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
@@ -461,11 +462,12 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                     IsActive = true
                 });
 
-                // Get minew stores count
-                var minewStores = await _storeRepo.GetStoresAsync(new StoreFilterDto
+                // Every store is a cloud store now, so the useful split is
+                // how many have actually reached Minew.
+                var syncedStores = await _storeRepo.GetStoresAsync(new StoreFilterDto
                 {
                     PageSize = 1,
-                    StoreType = "minew"
+                    IsSynced = true
                 });
 
                 var statistics = new
@@ -473,10 +475,8 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                     TotalStores = totalStores.TotalCount,
                     ActiveStores = activeStores.TotalCount,
                     InactiveStores = totalStores.TotalCount - activeStores.TotalCount,
-                    MinewStores = minewStores.TotalCount,
-                    LocalStores = totalStores.TotalCount - minewStores.TotalCount,
-                    SyncedStores = 0, // You need to implement this
-                    PendingSyncStores = 0 // You need to implement this
+                    SyncedStores = syncedStores.TotalCount,
+                    PendingSyncStores = totalStores.TotalCount - syncedStores.TotalCount
                 };
 
                 response.Success = true;
@@ -497,108 +497,6 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
         }
 
         // Helper methods
-        //private async Task SyncFromCloud(StoreSyncResultDto result)
-        //{
-        //    try
-        //    {
-        //        var token = await GetToken();
-        //        var cloudStores = await _minewService.GetStoresAsync(token);
-
-        //        if (string.IsNullOrEmpty(token))
-        //        {
-        //            return Unauthorized("Failed to get Minew authentication token");
-        //        }
-
-        //        var syncCount = await _storeRepo.SyncMinewStoresAsync(token, 1, null);
-        //        result.Details.Add(new StoreSyncDetailDto
-        //        {
-        //            StoreId = 0,
-        //            StoreName = "Cloud Sync",
-        //            Operation = "completed",
-        //            Message = "Fetched stores from cloud",
-        //            Timestamp = DateTime.UtcNow
-        //        });
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _logger.LogError(ex, "Error syncing from cloud");
-        //        result.Details.Add(new StoreSyncDetailDto
-        //        {
-        //            StoreId = 0,
-        //            StoreName = "Cloud Sync",
-        //            Operation = "failed",
-        //            Message = ex.Message,
-        //            Timestamp = DateTime.UtcNow
-        //        });
-        //        result.FailedCount++;
-        //    }
-        //}
-        private async Task SyncFromCloud(StoreSyncResultDto result)
-        {
-            try
-            {
-                result.Details.Add(new StoreSyncDetailDto
-                {
-                    StoreId = 0,
-                    StoreName = "Cloud Sync",
-                    Operation = "started",
-                    Message = "Starting cloud sync...",
-                    Timestamp = DateTime.UtcNow
-                });
-
-                // Get token
-                string token = await GetToken();
-
-                if (string.IsNullOrEmpty(token))
-                {
-                    throw new UnauthorizedAccessException("Failed to get authentication token");
-                }
-
-                // Use the existing repository method - fixed variable name
-                var syncCount = await _storeRepo.SyncMinewStoresAsync(token, 1, null);
-
-                result.Details.Add(new StoreSyncDetailDto
-                {
-                    StoreId = 0,
-                    StoreName = "Cloud Sync",
-                    Operation = "completed",
-                    Message = $"Cloud sync completed: {syncCount} stores synchronized",
-                    Timestamp = DateTime.UtcNow
-                });
-
-                // Fixed: Changed result.SyncedFromCloud to match DTO property name
-                result.SyncedCount = syncCount;
-                result.TotalSynced += syncCount;
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                _logger.LogError(ex, "Authentication failed during cloud sync");
-                result.Details.Add(new StoreSyncDetailDto
-                {
-                    StoreId = 0,
-                    StoreName = "Cloud Sync",
-                    Operation = "auth_failed",
-                    Message = "Authentication failed: " + ex.Message,
-                    Timestamp = DateTime.UtcNow
-                });
-                result.FailedCount++;
-                throw; // Re-throw auth failures
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error syncing from cloud");
-                result.Details.Add(new StoreSyncDetailDto
-                {
-                    StoreId = 0,
-                    StoreName = "Cloud Sync",
-                    Operation = "failed",
-                    Message = $"Cloud sync failed: {ex.Message}",
-                    Timestamp = DateTime.UtcNow
-                });
-                result.FailedCount++;
-                // Don't throw here to allow local-to-cloud sync to proceed if possible
-            }
-        }
 
         private async Task SyncToCloud(List<long> storeIds, StoreSyncResultDto result)
         {
@@ -645,7 +543,7 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
         private async Task SyncStoreToCloud(long storeId)
         {
             var store = await _storeRepo.GetStoreByIdAsync(storeId);
-            if (store == null || store.StoreType != "minew")
+            if (store == null)
                 return;
 
             var token = await GetToken();
@@ -658,9 +556,11 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                     // leaving it empty is why these calls used to be rejected.
                     var addRequest = new MinewAddStoreRequest
                     {
+                        // Minew only accepts a numeric code (54030), so the
+                        // fallback has to be digits too - the row id, not "ST{id}".
                         number = !string.IsNullOrWhiteSpace(store.StoreCode)
                             ? store.StoreCode.Trim()
-                            : $"ST{store.Id}",
+                            : store.Id.ToString(),
                         name = store.StoreName,
                         address = store.Address ?? string.Empty,
                     };
@@ -678,21 +578,62 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                     {
                         throw new Exception("Minew requires a store name for a cloud store.");
                     }
-
-                    var response = await _minewService.AddStoreAsync(addRequest);
-                    EnsureMinewSucceeded(response, "add store");
-
-                    // Add may return the new id directly, or nothing useful - in
-                    // which case find it by the number we just registered.
-                    store.MinewStoreId =
-                        ExtractMinewStoreId(response)
-                        ?? await FindCloudStoreIdAsync(token, addRequest.number, store.StoreName);
-
-                    if (string.IsNullOrEmpty(store.MinewStoreId))
+                    // 54030 comes back localised ("门店编号只能数字"), which tells
+                    // an English-speaking operator nothing. Pre-empt it.
+                    if (!addRequest.number.All(char.IsDigit))
                     {
                         throw new Exception(
-                            "Minew accepted the store but no cloud id could be resolved; " +
-                            "refusing to mark it synced.");
+                            $"Minew only accepts a numeric store code, but this store's code is " +
+                            $"'{addRequest.number}'. Change it to digits only and sync again.");
+                    }
+
+                    // A local row with no cloud id does not mean the cloud has
+                    // never heard of this store: the id is lost whenever a
+                    // previous sync failed after Minew had already created it,
+                    // or when the row predates cloud sync. Adding again would
+                    // either be rejected as a duplicate code or, worse, create a
+                    // second cloud store. Adopt the existing one instead.
+                    var existingId = await FindCloudStoreIdAsync(
+                        token, addRequest.number, store.StoreName);
+
+                    if (!string.IsNullOrEmpty(existingId))
+                    {
+                        _logger.LogInformation(
+                            $"Store {store.Id} ('{store.StoreName}', code {addRequest.number}) " +
+                            $"already exists in Minew as {existingId}; adopting that id " +
+                            "instead of adding a duplicate.");
+
+                        store.MinewStoreId = existingId;
+
+                        // Push local edits up, so adopting also reconciles content.
+                        var adoptRequest = new MinewUpdateStoreRequest
+                        {
+                            id = existingId,
+                            name = store.StoreName,
+                            address = store.Address ?? string.Empty,
+                            active = store.IsActive ? 1 : 0,
+                        };
+
+                        EnsureMinewSucceeded(
+                            await _minewService.UpdateStoreAsync(adoptRequest), "update store");
+                    }
+                    else
+                    {
+                        var response = await _minewService.AddStoreAsync(addRequest);
+                        EnsureMinewSucceeded(response, "add store");
+
+                        // Add may return the new id directly, or nothing useful -
+                        // in which case find it by the code we just registered.
+                        store.MinewStoreId =
+                            ExtractMinewStoreId(response)
+                            ?? await FindCloudStoreIdAsync(token, addRequest.number, store.StoreName);
+
+                        if (string.IsNullOrEmpty(store.MinewStoreId))
+                        {
+                            throw new Exception(
+                                "Minew accepted the store but no cloud id could be resolved; " +
+                                "refusing to mark it synced.");
+                        }
                     }
                 }
                 else
@@ -811,8 +752,12 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
         }
 
         /// <summary>
-        /// Fallback when add does not echo the id: list the cloud's stores and
-        /// match on the number we registered, then on name.
+        /// Resolves a store's cloud id by listing Minew's stores and matching on
+        /// the code we registered it under, falling back to an exact name match.
+        ///
+        /// Used two ways: as a fallback when add does not echo the id, and up
+        /// front to adopt a store that already exists in the cloud rather than
+        /// adding a duplicate.
         /// </summary>
         private async Task<string> FindCloudStoreIdAsync(string token, string number, string name)
         {
@@ -823,10 +768,15 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
                 if (items == null || items.Count == 0)
                     return null;
 
+                // The code we send as `number` comes back as merchantCode, not
+                // name. Comparing it against name meant the code lookup never
+                // matched and everything fell through to the name match, which
+                // is not unique - two stores can share a name, so this could
+                // adopt the wrong cloud store.
                 var match =
                     items.FirstOrDefault(s =>
                         !string.IsNullOrEmpty(number) &&
-                        string.Equals(s.name, number, StringComparison.OrdinalIgnoreCase))
+                        string.Equals(s.merchantCode, number, StringComparison.OrdinalIgnoreCase))
                     ?? items.FirstOrDefault(s =>
                         string.Equals(s.name, name, StringComparison.OrdinalIgnoreCase));
 

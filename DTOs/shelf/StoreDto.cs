@@ -13,9 +13,16 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
         [StringLength(200, ErrorMessage = "Store name cannot exceed 200 characters")]
         public string StoreName { get; set; }
 
+        // Minew rejects a blank number or address on store/add (code 54029), and
+        // every store is published to Minew, so both are mandatory up front.
+        // It also rejects a non-numeric code (code 54030: 门店编号只能数字),
+        // so reject that here rather than after the store is already saved.
+        [Required(ErrorMessage = "Store code is required")]
+        [RegularExpression(@"^\d+$", ErrorMessage = "Store code must contain digits only")]
         [StringLength(50, ErrorMessage = "Store code cannot exceed 50 characters")]
         public string StoreCode { get; set; }
 
+        [Required(ErrorMessage = "Address is required")]
         [StringLength(500, ErrorMessage = "Address cannot exceed 500 characters")]
         public string Address { get; set; }
 
@@ -29,9 +36,9 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
         [StringLength(100, ErrorMessage = "Contact person cannot exceed 100 characters")]
         public string ContactPerson { get; set; }
 
-        public string StoreType { get; set; } = "local"; // minew or local
+        // Note: there is no local-vs-minew choice. Every store is created
+        // locally and published to Minew, so StoreType is set by the server.
 
-        // For Minew stores
         public string MinewStoreId { get; set; }
         public string MinewTemplateId { get; set; }
 
@@ -46,8 +53,9 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
 
     public class StoreSyncRequestDto
     {
-        public bool SyncToCloud { get; set; } = false;
-        public bool SyncFromCloud { get; set; } = true;
+        // Sync is push-only: stores are created locally and pushed up to Minew.
+        // Pulling stores down from Minew is intentionally not supported.
+        public bool SyncToCloud { get; set; } = true;
         public List<long> StoreIds { get; set; } = new List<long>();
     }
 

@@ -109,24 +109,6 @@ public class DeviceController : ControllerBase
     }
     #endregion
 
-    // ============ STORE MANAGEMENT ============
-
-    [HttpGet("stores")]
-    public async Task<IActionResult> GetStores()
-    {
-        try
-        {
-            var token = await GetToken();
-
-            var result = await _minewService.GetStoresAsync(token);
-            return Ok(result);
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
-
     #region Device Handlers
 
     [HttpGet("devices/sync")]
