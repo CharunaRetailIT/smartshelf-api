@@ -4172,6 +4172,134 @@ namespace TERMS_LOYALTY_API.Repository
 
         #endregion
 
+        #region External integration (lookup by MAC)
+
+        /// <summary>
+        /// Looks a device up by MAC and returns it with everything it is bound to.
+        /// MACs reach us in both forms - Minew reports a bare 12-hex string while
+        /// hand-entered hardware uses colons or dashes - so both sides of the
+        /// comparison are stripped and lower-cased rather than matched literally.
+        /// </summary>
+        public async Task<DeviceDetailDto> GetDeviceDetailByMacAsync(string mac, long? storeId)
+        {
+            if (string.IsNullOrWhiteSpace(mac))
+                return null;
+
+            var normalized = mac.Replace(":", string.Empty).Replace("-", string.Empty).Replace(" ", string.Empty).ToLower();
+
+            var device = await _context.DeviceMaster
+                .Include(d => d.Store)
+                .Include(d => d.Status)
+                .Include(d => d.DeviceScreen)
+                .Where(d => d.MACAddress.Replace(":", string.Empty).Replace("-", string.Empty).ToLower() == normalized)
+                .Where(d => !storeId.HasValue || d.StoreId == storeId.Value)
+                .OrderByDescending(d => d.IsActive)
+                .FirstOrDefaultAsync();
+
+            if (device == null)
+                return null;
+
+            var detail = new DeviceDetailDto
+            {
+                Id = device.Id,
+                Mac = device.MACAddress,
+                DeviceName = device.Name,
+                Description = device.Description,
+                DeviceType = device.DeviceType,
+                MinewDeviceId = device.MinewDeviceId,
+                Status = device.Status?.Name ?? string.Empty,
+                Battery = device.Battery,
+                IsOnline = device.IsOnline,
+                IsActive = device.IsActive,
+                LastSeen = device.LastSeen,
+                LastSyncTime = device.LastSyncTime,
+                Firmware = device.Firmware,
+                Hardware = device.Hardware,
+                IPAddress = device.IPAddress,
+                NetworkName = device.NetworkName,
+                ScreenId = device.ScreenId,
+                ScreenInch = device.DeviceScreen?.Inch,
+                ScreenWidth = device.DeviceScreen?.Width,
+                ScreenHeight = device.DeviceScreen?.Height,
+                ScreenColor = device.ScreenColor,
+                StoreId = device.StoreId,
+                StoreName = device.Store?.StoreName ?? string.Empty,
+                MinewStoreId = device.Store?.MinewStoreId,
+                CreatedDate = device.CreatedDate,
+                UpdatedDate = device.UpdatedDate,
+            };
+
+            detail.Bindings = await GetDeviceBindingsAsync(device.Id);
+            return detail;
+        }
+
+        private async Task<List<DeviceBindingDto>> GetDeviceBindingsAsync(long deviceId)
+        {
+            var templateComboIds = await _context.DeviceTemplateCombos
+                .Where(c => c.DeviceId == deviceId)
+                .Select(c => c.Id)
+                .ToListAsync();
+
+            var messageComboIds = await _context.DeviceMessageCombos
+                .Where(c => c.DeviceId == deviceId)
+                .Select(c => c.Id)
+                .ToListAsync();
+
+            var assignments = await _context.DeviceAssignment
+                .Where(a => a.IsActive
+                            && ((a.DeviceTemplateComboId.HasValue && templateComboIds.Contains(a.DeviceTemplateComboId.Value))
+                             || (a.DeviceMessageComboId.HasValue && messageComboIds.Contains(a.DeviceMessageComboId.Value))))
+                .Include(a => a.DeviceTemplateCombo).ThenInclude(c => c.Template)
+                .Include(a => a.DeviceMessageCombo).ThenInclude(c => c.Message)
+                .OrderBy(a => a.DisplayOrder)
+                .ToListAsync();
+
+            // Product names/prices are resolved in one round trip rather than a
+            // lookup per assignment.
+            var productIds = assignments
+                .Where(a => a.LocationType == "Product")
+                .Select(a => a.LocationId)
+                .Distinct()
+                .ToList();
+
+            var products = await _context.ProductMaster
+                .Where(p => productIds.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id);
+
+            var bindings = new List<DeviceBindingDto>();
+
+            foreach (var assignment in assignments)
+            {
+                var binding = new DeviceBindingDto
+                {
+                    AssignmentId = assignment.Id,
+                    AssignmentType = assignment.AssignmentType,
+                    LocationType = assignment.LocationType,
+                    LocationId = assignment.LocationId,
+                    DisplayOrder = assignment.DisplayOrder,
+                    TemplateId = assignment.DeviceTemplateCombo?.TemplateId,
+                    TemplateName = assignment.DeviceTemplateCombo?.Template?.Name,
+                    MessageId = assignment.DeviceMessageCombo?.MessageId,
+                    MessageName = assignment.DeviceMessageCombo?.Message?.Title,
+                };
+
+                if (assignment.LocationType == "Product" && products.TryGetValue(assignment.LocationId, out var product))
+                {
+                    binding.ProductId = product.Id;
+                    binding.ProductCode = product.ProductCode;
+                    binding.ProductName = product.ProductName;
+                    binding.SellingPrice = product.SellingPrice;
+                    binding.DiscountPrice = product.DiscountPrice;
+                }
+
+                bindings.Add(binding);
+            }
+
+            return bindings;
+        }
+
+        #endregion
+
         // Custom Exceptions
         public class NotFoundException : Exception
         {

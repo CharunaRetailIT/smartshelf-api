@@ -26,6 +26,11 @@ namespace TERMS_MOBILE_WEB_API.Controllers
         }
 
 
+        /// <summary>
+        /// Every system user from the ERP database. POST despite taking no body.
+        /// 
+        /// Unrelated to SmartShelf sign-in, which is /api/auth.
+        /// </summary>
         [HttpPost("GetSystemUsersDetails")]
         public async Task<HttpResponseData<UserMaster>> GetAllSystemUsers()
         {
@@ -54,6 +59,11 @@ namespace TERMS_MOBILE_WEB_API.Controllers
             return await Task.FromResult(result);
         }
 
+        /// <summary>
+        /// One ERP user by username.
+        /// 
+        /// Unrelated to SmartShelf sign-in, which is /api/auth.
+        /// </summary>
         [HttpPost("GetUserDetails")]
         public async Task<HttpResponseData<ReturnUserDetails>> GetUserDetails(UserDetailRequest ObjUsr)
         {

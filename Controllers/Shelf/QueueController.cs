@@ -36,7 +36,10 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
 
-        // GET: api/queue
+        /// <summary>
+        /// Paged list of scheduled label updates, filterable by store, device, status and location.
+        /// Status accepts Pending, Processing, Completed or Failed.
+        /// </summary>
         [HttpGet]
         [ProducesResponseType(typeof(HttpResponseData<PagedResult<QueueDto>>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
@@ -68,7 +71,11 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // GET: api/queue/{id}
+        /// <summary>
+        /// One queue with its execution history.
+        /// When a label did not change, this is where the reason is: ErrorMessage carries the
+        /// vendor cloud's own rejection text and BindingData holds its raw response.
+        /// </summary>
         [HttpGet("{id}")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDetailDto>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -110,7 +117,18 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // POST: api/queue/direct
+        /// <summary>
+        /// Schedules a product onto a label for a time window.
+        /// 
+        /// The price is read when the queue FIRES, not when it is created - schedule a promotion
+        /// today and the label picks up whatever the selling price is at that moment.
+        /// 
+        /// StartDate and EndDate are UTC. Sri Lanka is UTC+5:30, so a 3:00pm local promotion is
+        /// sent as 09:30. Set EndDate: the overlap check cannot compare against an open-ended queue.
+        /// 
+        /// TemplateId is required for Minew devices even when the point is the message.
+        /// Returns 409 when an unfinished queue already covers the same device and template.
+        /// </summary>
         [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("direct")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 201)]
@@ -173,7 +191,11 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // POST: api/queue/from-assignment
+        /// <summary>
+        /// Schedules a label that is already bound, so the device, template and product do not
+        /// have to be repeated. AssignmentId is the TemplateAssignmentId returned by
+        /// GET /api/products/by-code/{productCode}.
+        /// </summary>
         [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("from-assignment")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 201)]
@@ -228,7 +250,10 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // PUT: api/queue/{id}
+        /// <summary>
+        /// Reschedules a queue. Only the fields sent are applied; all are optional except UserId.
+        /// Times are UTC, as on create.
+        /// </summary>
         [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("{id}")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 200)]
@@ -282,7 +307,10 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // DELETE: api/queue/{id}
+        /// <summary>
+        /// Removes a schedule.
+        /// Returns 409 while the queue is still displaying on its label - deactivate it first.
+        /// </summary>
         [Authorize(Roles = "Admin,Manager")]
         [HttpDelete("{id}")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
@@ -311,6 +339,17 @@ namespace TERMS_LOYALTY_API.Controllers
                     ResponsCode = 200
                 });
             }
+            catch (QueueDisplayActiveException ex)
+            {
+                // Still driving a label - a conflict the caller can resolve by
+                // deactivating first, not a server fault.
+                return Conflict(new HttpResponseData<object>
+                {
+                    Success = false,
+                    Message = ex.Message,
+                    ResponsCode = 409
+                });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error deleting queue ID {id}");
@@ -324,7 +363,14 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // POST: api/queue/{id}/activate
+        /// <summary>
+        /// Fires a queue immediately instead of waiting for its start time. Performs the real
+        /// cloud bind, so the physical label repaints.
+        /// 
+        /// Returns 400 if the start time has not arrived, and 409 if the queue has already run -
+        /// usually because the background processor got there first. Neither changes the queue's
+        /// recorded outcome, so a Failed status always reflects a genuine bind attempt.
+        /// </summary>
         [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("{id}/activate")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 200)]
@@ -353,6 +399,27 @@ namespace TERMS_LOYALTY_API.Controllers
                     ResponsCode = 404
                 });
             }
+            catch (QueueAlreadyActivatedException ex)
+            {
+                // The queue has already run - most often because the background
+                // processor picked it up first. That is a conflict, not a server
+                // fault, and the queue's own status is left as its real run left it.
+                return Conflict(new HttpResponseData<object>
+                {
+                    Success = false,
+                    Message = ex.Message,
+                    ResponsCode = 409
+                });
+            }
+            catch (QueueNotDueException ex)
+            {
+                return BadRequest(new HttpResponseData<object>
+                {
+                    Success = false,
+                    Message = ex.Message,
+                    ResponsCode = 400
+                });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error activating queue ID {id}");
@@ -366,7 +433,10 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // POST: api/queue/{id}/deactivate
+        /// <summary>
+        /// Retires a running queue. It stays Completed rather than reverting to Pending so the
+        /// history stays truthful, and IsActive is cleared - which is also what makes it deletable.
+        /// </summary>
         [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("{id}/deactivate")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 200)]
@@ -408,7 +478,10 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // GET: api/queue/upcoming
+        /// <summary>
+        /// Queues that are armed and about to run within the next N hours.
+        /// The quickest check that a schedule was accepted.
+        /// </summary>
         [HttpGet("upcoming")]
         [ProducesResponseType(typeof(HttpResponseData<List<QueueDto>>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -439,7 +512,9 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // GET: api/queue/active
+        /// <summary>
+        /// Queues currently inside their display window.
+        /// </summary>
         [HttpGet("active")]
         [ProducesResponseType(typeof(HttpResponseData<List<QueueDto>>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -470,7 +545,10 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // GET: api/queue/device/{deviceId}
+        /// <summary>
+        /// Everything scheduled against one label - useful when a label is showing something
+        /// unexpected.
+        /// </summary>
         [HttpGet("device/{deviceId}")]
         [ProducesResponseType(typeof(HttpResponseData<List<QueueDto>>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -501,7 +579,9 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // GET: api/queue/location/{locationType}/{locationId}
+        /// <summary>
+        /// Queues targeting one product or shelf. LocationType is PRODUCT or SHELF.
+        /// </summary>
         [HttpGet("location/{locationType}/{locationId}")]
         [ProducesResponseType(typeof(HttpResponseData<List<QueueDto>>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -532,7 +612,9 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
-        // GET: api/queue/stats
+        /// <summary>
+        /// Queue counts by status for a store - pending, completed and failed.
+        /// </summary>
         [HttpGet("stats")]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -562,7 +644,10 @@ namespace TERMS_LOYALTY_API.Controllers
                 });
             }
         }
-        // GET: api/priority
+        /// <summary>
+        /// The PriorityId values: 1 Emergency, 2 Price Change, 3 Promotion, 4 Scheduled (default),
+        /// 5 Maintenance.
+        /// </summary>
         [HttpGet("prioritytypes")]
         [ProducesResponseType(typeof(HttpResponseData<PriorityMaster>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]

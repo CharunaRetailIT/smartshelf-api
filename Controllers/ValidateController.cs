@@ -21,6 +21,9 @@ namespace TERMS_LOYALTY_API.Controllers
         {
             _logger = logger;
         }
+        /// <summary>
+        /// Whether an email address is already registered. Used for form validation.
+        /// </summary>
         [HttpGet("IsEmailExists")]
         public async Task<IActionResult> IsEmailExists(string email)
         {
@@ -28,6 +31,9 @@ namespace TERMS_LOYALTY_API.Controllers
             return Json(new { exists = exists });
         }
 
+        /// <summary>
+        /// Whether a telephone number is already registered.
+        /// </summary>
         [HttpGet("IsTelephoneExists")]
         public async Task<IActionResult> IsTelephoneExists(string telephone)
         {
@@ -35,6 +41,9 @@ namespace TERMS_LOYALTY_API.Controllers
             return Json(new { exists = exists });
         }
 
+        /// <summary>
+        /// Whether a National Identity Card number is already registered.
+        /// </summary>
         [HttpGet("IsNICExists")]
         public async Task<IActionResult> IsNICExists(string nic)
         {
@@ -42,6 +51,9 @@ namespace TERMS_LOYALTY_API.Controllers
             return Json(new { exists = exists });
         }
 
+        /// <summary>
+        /// The configured company name, for display in client applications.
+        /// </summary>
         [HttpGet("GetCompanyName")]
         public async Task<IActionResult> GetCompanyName()
         {

@@ -33,6 +33,12 @@ namespace TERMS_MOBILE_WEB_API.Controllers
 
         }
 
+        /// <summary>
+        /// Legacy ERP token issuer, kept for older clients.
+        /// 
+        /// SmartShelf clients should use POST /api/auth/login instead - it returns the JWT
+        /// these APIs expect and the user's store.
+        /// </summary>
         [HttpPost]
         public async Task<IActionResult> Post(ApplicationUser _userData)
         {

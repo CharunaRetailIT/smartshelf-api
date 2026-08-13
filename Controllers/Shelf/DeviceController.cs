@@ -111,6 +111,10 @@ public class DeviceController : ControllerBase
 
     #region Device Handlers
 
+    /// <summary>
+    /// Pulls the device list for a store down from the Minew cloud and updates the local
+    /// records. eqstatus filters by cloud device status (default 1,2,8,9).
+    /// </summary>
     [HttpGet("devices/sync")]
     public async Task<IActionResult> SyncDevices([FromQuery] int storeId, [FromQuery] string eqstatus = "1,2,8,9")
     {
@@ -519,6 +523,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// All active ESL devices held locally. The id values here are what you pass as
+    /// deviceId in eslAssignments.
+    /// </summary>
     [HttpGet("devices/local")]
     public async Task<IActionResult> GetLocalDevices()
     {
@@ -624,6 +632,50 @@ public class DeviceController : ControllerBase
     }
 
     /// <summary>
+    /// Full device record for a MAC address, including everything it is currently
+    /// bound to (product, template, message). The MAC may be given bare
+    /// (e1000005e79d) or separated (e1:00:00:05:e7:9d) - both match the same
+    /// device. storeId is optional and only needed to disambiguate a MAC that has
+    /// been registered in more than one store.
+    /// </summary>
+    [HttpGet("device/by-mac/{mac}")]
+    [ProducesResponseType(typeof(HttpResponseData<DeviceDetailDto>), 200)]
+    [ProducesResponseType(typeof(HttpResponseData<DeviceDetailDto>), 404)]
+    [ProducesResponseType(typeof(HttpResponseData<DeviceDetailDto>), 500)]
+    public async Task<IActionResult> GetDeviceByMac(string mac, [FromQuery] long? storeId = null)
+    {
+        var response = new HttpResponseData<DeviceDetailDto>();
+        try
+        {
+            var device = await _deviceRepo.GetDeviceDetailByMacAsync(mac, storeId);
+            if (device == null)
+            {
+                response.Success = false;
+                response.Message = storeId.HasValue
+                    ? $"Device with MAC {mac} not found in store {storeId.Value}."
+                    : $"Device with MAC {mac} not found.";
+                response.ResponsCode = 404;
+                return NotFound(response);
+            }
+
+            response.Success = true;
+            response.Message = "Device retrieved successfully.";
+            response.Result = device;
+            response.ResponsCode = 200;
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving device by MAC {Mac}", mac);
+            response.Success = false;
+            response.Message = "Failed to retrieve device.";
+            response.Error = ex.Message;
+            response.ResponsCode = 500;
+            return Problem(title: response.Message, detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
     /// Retrieves devices by a list of IDs.
     /// </summary>
     [HttpPost("devices/by-ids")]
@@ -689,6 +741,10 @@ public class DeviceController : ControllerBase
         return v.Equals("success", StringComparison.OrdinalIgnoreCase) || v == "成功";
     }
 
+    /// <summary>
+    /// Registers a device locally. The MAC may be bare 12-hex (e1000005e79d) or
+    /// separated; it must be unique within the store.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("device")]
     [ProducesResponseType(typeof(HttpResponseData<DeviceDto>), 200)]
@@ -748,6 +804,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Updates a device's name, screen, network details or store.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPut("device/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<DeviceDto>), 200)]
@@ -818,6 +877,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Soft-deletes a device. Rejected while the device still has active assignments.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("device/{id}/user/{userId}")]
     [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
@@ -869,6 +931,10 @@ public class DeviceController : ControllerBase
     }
 
 
+    /// <summary>
+    /// Flashes a label's LED so it can be found on the shelf. Does not change what the
+    /// screen displays.
+    /// </summary>
     [HttpGet("devices/light-up")]
     public async Task<IActionResult> LightUpDevice([FromQuery] string mac, [FromQuery] string storeId,
     [FromQuery] int color = 1, [FromQuery] int total = 5, [FromQuery] int period = 500,
@@ -968,6 +1034,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Registers many labels with the Minew cloud in one call, from a list of MAC
+    /// addresses.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("devices/batch-add-minew")]
     [ProducesResponseType(typeof(HttpResponseData<BatchAddResult>), 200)]
@@ -1241,6 +1311,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Same as batch-add-minew, taking the MAC addresses from an uploaded Excel file
+    /// instead of a JSON list.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("devices/batch-add-minew-upload")]
     [ProducesResponseType(typeof(HttpResponseData<BatchAddResult>), 200)]
@@ -1345,6 +1419,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Wakes sleeping labels so they accept the next bind. A label that was asleep
+    /// when bound will not repaint until it wakes.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("devices/batch-wake")]
     [ProducesResponseType(typeof(HttpResponseData<BatchWakeResult>), 200)]
@@ -1468,6 +1546,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Waits delaySeconds, then re-syncs the store's devices from the cloud. Pairs with
+    /// batch-wake: labels report their new state only once they have woken.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("devices/delayed-sync")]
     [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
@@ -1605,6 +1687,9 @@ public class DeviceController : ControllerBase
 
     #region Device Screen 
 
+    /// <summary>
+    /// One screen definition - physical size, resolution and colour capability.
+    /// </summary>
     [HttpGet("screen/{id}")]
     public async Task<IActionResult> GetScreenById(long id)
     {
@@ -1637,6 +1722,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Paged list of screen definitions.
+    /// </summary>
     [HttpGet("screen/paged")]
     public async Task<IActionResult> GetAllScreenPaged([FromQuery] DeviceScreenPagedRequest request)
     {
@@ -1661,6 +1749,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Screen definitions that can be assigned to a device, optionally filtered by
+    /// screen type.
+    /// </summary>
     [HttpGet("screen/available")]
     public async Task<IActionResult> GetAvailableScreens([FromQuery] long? screenTypeId = null)
     {
@@ -1685,6 +1777,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Creates a screen definition (inches, width, height, colour).
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("screen")]
     public async Task<IActionResult> CreateScreen([FromBody] DeviceScreenCreateDto createDto)
@@ -1718,6 +1813,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Updates a screen definition. The id travels in the body, not the route.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPut("screen")]
     public async Task<IActionResult> UpdateScreen([FromBody] DeviceScreenUpdateDto updateDto)
@@ -1759,6 +1857,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Deletes a screen definition. Check can-delete first - a screen in use by any
+    /// device cannot be removed.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("screen/{id}")]
     public async Task<IActionResult> DeleteScreen(long id)
@@ -1811,6 +1913,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Flips a screen definition between active and inactive. The user id travels in
+    /// the body.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPatch("screen/{id}/toggle-active")]
     public async Task<IActionResult> ToggleScreenActive(long id, [FromBody] int userId)
@@ -1852,6 +1958,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// How many devices use this screen definition.
+    /// </summary>
     [HttpGet("screen/{id}/device-count")]
     public async Task<IActionResult> GetScreenDeviceCount(long id)
     {
@@ -1876,6 +1985,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Whether this screen definition can be deleted - false when any device uses it.
+    /// </summary>
     [HttpGet("screen/{id}/can-delete")]
     public async Task<IActionResult> CanScreenDelete(long id)
     {
@@ -1905,6 +2017,10 @@ public class DeviceController : ControllerBase
     // Controllers/DeviceController.cs - Add these methods to existing controller
     #region Gateway Management
 
+    /// <summary>
+    /// Paged list of gateways. A gateway is the radio bridge between the labels and
+    /// the cloud.
+    /// </summary>
     [HttpGet("gateways/paged")]
     [ProducesResponseType(typeof(HttpResponseData<PagedResult<GatewayDto>>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -1934,6 +2050,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// One gateway by id.
+    /// </summary>
     [HttpGet("gateway/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<GatewayDto>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
@@ -1969,6 +2088,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Registers a gateway locally.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("gateway")]
     [ProducesResponseType(typeof(HttpResponseData<GatewayDto>), 200)]
@@ -2028,6 +2150,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Updates a gateway's name or details.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPut("gateway/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<GatewayDto>), 200)]
@@ -2080,6 +2205,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Soft-deletes a gateway.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("gateway/{id}/user/{userId}")]
     [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
@@ -2120,6 +2248,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Pulls the store's gateways down from the Minew cloud into the local records.
+    /// </summary>
     [HttpGet("gateways/sync")]
     public async Task<IActionResult> SyncGateways([FromQuery] long storeId)
     {
@@ -2173,6 +2304,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Registers a gateway with the Minew cloud so its labels can reach the network.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("gateway/add-to-minew")]
     public async Task<IActionResult> AddGatewayToMinew([FromBody] AddGatewayToMinewRequest request)
@@ -2231,6 +2365,13 @@ public class DeviceController : ControllerBase
 
     #region Minew Template Handlers
 
+    /// <summary>
+    /// Minew label templates synced into SmartShelf. The id values here are what you
+    /// pass as templateId - they are long numeric strings, so keep them quoted.
+    /// 
+    /// A template belongs to one Minew store and one screen size; using one from
+    /// another store is rejected at bind time with 模板不存在.
+    /// </summary>
     [HttpGet("template/local")]
     public async Task<IActionResult> GetLocalTemplate()
     {
@@ -2249,6 +2390,9 @@ public class DeviceController : ControllerBase
     }
 
     // New paginated endpoints
+    /// <summary>
+    /// Paged version of devices/local.
+    /// </summary>
     [HttpGet("devices/local/paged")]
     [ProducesResponseType(typeof(HttpResponseData<PagedResult<DeviceDto>>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -2276,6 +2420,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Paged list of local templates.
+    /// </summary>
     [HttpGet("template/local/paged")]
     [ProducesResponseType(typeof(HttpResponseData<PagedResult<TemplateDto>>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -2398,6 +2545,10 @@ public class DeviceController : ControllerBase
 
 
     // Optional: Update original template endpoint to support simple pagination without breaking changes
+    /// <summary>
+    /// Paged template list taking its paging and search as plain query parameters
+    /// rather than a bound request object.
+    /// </summary>
     [HttpGet("template/local/v2")]
     public async Task<IActionResult> GetLocalTemplateV2(
         [FromQuery] int pageNumber = 1,
@@ -2437,6 +2588,10 @@ public class DeviceController : ControllerBase
 
     // ============ TEMPLATE MANAGEMENT ============
 
+    /// <summary>
+    /// Pulls the store's templates down from the Minew cloud. Run this after creating
+    /// or editing a template in the Minew console.
+    /// </summary>
     [HttpGet("templates/sync")]
     public async Task<IActionResult> SyncTemplates([FromQuery] long storeId)
     {
@@ -2510,6 +2665,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Renders a preview image of a template without sending anything to hardware.
+    /// </summary>
     [HttpPost("templates/preview")]
     public async Task<IActionResult> GetTemplatePreview([FromBody] TemplatePreviewRequest request)
     {
@@ -2548,6 +2706,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Removes a local template record. Does not delete it from the Minew console.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("template/{id}/user/{userId}")]
     [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
@@ -2602,6 +2763,10 @@ public class DeviceController : ControllerBase
 
     #region Device - Template Combination
 
+    /// <summary>
+    /// Pairs a device with a template. The resulting combo id is what bind and
+    /// assignment calls refer to. Reuses an existing pair rather than duplicating it.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("combos")]
     public async Task<IActionResult> CreateCombo([FromBody] CreateComboRequest request)
@@ -2647,6 +2812,9 @@ public class DeviceController : ControllerBase
     /// Get Device and Template Combinations
     /// </summary>
     /// <returns></returns>
+    /// <summary>
+    /// All device+template pairings.
+    /// </summary>
     [HttpGet("combos")]
     public async Task<IActionResult> GetDeviceTemplateCombos()
     {
@@ -2898,6 +3066,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Deletes a device+template pairing. Rejected while an active assignment uses it.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("combos/{id}/user/{userId}")]
     [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
@@ -2950,626 +3121,20 @@ public class DeviceController : ControllerBase
 
     #endregion
 
-    #region Device - Message Combination Handers
-    /// <summary>
-    /// Get DeviceMessageCombo by ID
-    /// </summary>
-    [HttpGet("messagecombo/{id}")]
-    [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> GetById(long id)
-    {
-        try
-        {
-            var result = await _deviceRepo.GetByIdAsync(id);
-
-            if (result == null)
-            {
-                return NotFound(new HttpResponseData<object>
-                {
-                    Success = false,
-                    Message = $"DeviceMessageCombo with ID {id} not found"
-                });
-            }
-
-            return Ok(new HttpResponseData<DeviceMessageCombos>
-            {
-                Result = result,
-                Success = true,
-                Message = "DeviceMessageCombo retrieved successfully"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting DeviceMessageCombo by ID: {Id}", id);
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while processing your request",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Get all active DeviceMessageCombos
-    /// </summary>
-    [HttpGet("messagecombo")]
-    [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> GetAll()
-    {
-        try
-        {
-            var result = await _deviceRepo.GetAllAsync();
-
-            return Ok(new HttpResponseData<DeviceMessageCombos>
-            {
-                Results = result,
-                Success = true,
-                Message = $"Retrieved {result.Count} DeviceMessageCombos"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting all DeviceMessageCombos");
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while processing your request",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Get paginated DeviceMessageCombos
-    /// </summary>
-    [HttpGet("messagecombo/paged")]
-    [ProducesResponseType(typeof(HttpResponseData<PagedResult<DeviceMessageComboDto>>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> GetPaged([FromQuery] DeviceMessageComboPagedRequest request)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(new HttpResponseData<object>
-                {
-                    Success = false,
-                    Message = "Invalid request parameters",
-                    Error = ModelState.Values.ToString()
-                });
-            }
-
-            var result = await _deviceRepo.GetPagedAsync(request);
-
-            return Ok(new HttpResponseData<PagedResult<DeviceMessageComboDto>>
-            {
-                Result = result,
-                Success = true,
-                Message = $"Retrieved {result.Items.Count} of {result.TotalCount} DeviceMessageCombos"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting paginated DeviceMessageCombos");
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while processing your request",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Create a new DeviceMessageCombo
-    /// </summary>
-    [Authorize(Roles = "Admin,Manager")]
-    [HttpPost("messagecombo")]
-    [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 201)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 409)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> Create([FromBody] CreateDeviceMessageComboDto dto)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(new HttpResponseData<object>
-                {
-                    Success = false,
-                    Message = "Invalid request data",
-                    Error = ModelState.Values.ToString()
-                });
-            }
-
-            var result = await _deviceRepo.CreateAsync(dto);
-
-            return CreatedAtAction(nameof(GetById), new { id = result.Id },
-                new HttpResponseData<DeviceMessageCombos>
-                {
-                    Result = result,
-                    Success = true,
-                    Message = "DeviceMessageCombo created successfully"
-                });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new HttpResponseData<object>
-            {
-                Success = false,
-                Message = ex.Message
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating DeviceMessageCombo");
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while creating DeviceMessageCombo",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Update an existing DeviceMessageCombo
-    /// </summary>
-    [Authorize(Roles = "Admin,Manager")]
-    [HttpPut("messagecombo/{id}")]
-    [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 409)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> Update(long id, [FromBody] UpdateDeviceMessageComboDto dto)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(new HttpResponseData<object>
-                {
-                    Success = false,
-                    Message = "Invalid request data",
-                    Error = ModelState.Values.ToString()
-                });
-            }
-
-            var result = await _deviceRepo.UpdateAsync(id,dto);
-
-            return Ok(new HttpResponseData<DeviceMessageCombos>
-            {
-                Result = result,
-                Success = true,
-                Message = "DeviceMessageCombo updated successfully"
-            });
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new HttpResponseData<object>
-            {
-                Success = false,
-                Message = ex.Message
-            });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new HttpResponseData<object>
-            {
-                Success = false,
-                Message = ex.Message
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating DeviceMessageCombo with ID: {Id}", id);
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while updating DeviceMessageCombo",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Delete a DeviceMessageCombo
-    /// </summary>
-    [Authorize(Roles = "Admin,Manager")]
-    [HttpDelete("messagecombo/{id}")]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> Delete(long id)
-    {
-        try
-        {
-            var result = await _deviceRepo.DeleteAsync(id);
-
-            if (!result)
-            {
-                return NotFound(new HttpResponseData<object>
-                {
-                    Success = false,
-                    Message = $"DeviceMessageCombo with ID {id} not found"
-                });
-            }
-
-            return Ok(new HttpResponseData<object>
-            {
-                Success = true,
-                Message = "DeviceMessageCombo deleted successfully"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting DeviceMessageCombo with ID: {Id}", id);
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while deleting DeviceMessageCombo",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Get DeviceMessageCombos by Device ID
-    /// </summary>
-    [HttpGet("messagecombo/device/{deviceId}")]
-    [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> GetByDeviceId(long deviceId)
-    {
-        try
-        {
-            var result = await _deviceRepo.GetByDeviceIdAsync(deviceId);
-
-            return Ok(new HttpResponseData<DeviceMessageCombos>
-            {
-                Results = result,
-                Success = true,
-                Message = $"Retrieved {result.Count} DeviceMessageCombos for Device ID: {deviceId}"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting DeviceMessageCombos by DeviceId: {DeviceId}", deviceId);
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while processing your request",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Get DeviceMessageCombos by Message ID
-    /// </summary>
-    [HttpGet("messagecombo/message/{messageId}")]
-    [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> GetByMessageId(long messageId)
-    {
-        try
-        {
-            var result = await _deviceRepo.GetByMessageIdAsync(messageId);
-
-            return Ok(new HttpResponseData<DeviceMessageCombos>
-            {
-                Results = result,
-                Success = true,
-                Message = $"Retrieved {result.Count} DeviceMessageCombos for Message ID: {messageId}"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting DeviceMessageCombos by MessageId: {MessageId}", messageId);
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while processing your request",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Check if DeviceMessageCombo exists
-    /// </summary>
-    [HttpGet("messagecombo/exists")]
-    [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> Exists([FromQuery] long deviceId, [FromQuery] long messageId)
-    {
-        try
-        {
-            if (deviceId <= 0 || messageId <= 0)
-            {
-                return BadRequest(new HttpResponseData<object>
-                {
-                    Success = false,
-                    Message = "DeviceId and MessageId must be greater than 0"
-                });
-            }
-
-            var result = await _deviceRepo.ExistsAsync(deviceId, messageId);
-
-            return Ok(new HttpResponseData<bool>
-            {
-                Result = result,
-                Success = true,
-                Message = result ? "DeviceMessageCombo exists" : "DeviceMessageCombo does not exist"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error checking if DeviceMessageCombo exists");
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while processing your request",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Get total count of DeviceMessageCombos
-    /// </summary>
-    [HttpGet("messagecombo/count")]
-    [ProducesResponseType(typeof(HttpResponseData<int>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> GetTotalCount()
-    {
-        try
-        {
-            var count = await _deviceRepo.GetTotalCountAsync();
-
-            return Ok(new HttpResponseData<int>
-            {
-                Result = count,
-                Success = true,
-                Message = $"Total DeviceMessageCombos: {count}"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting total count of DeviceMessageCombos");
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while processing your request",
-                Error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Deactivate all DeviceMessageCombos by Device ID
-    /// </summary>
-    [Authorize(Roles = "Admin,Manager")]
-    [HttpPut("messagecombo/device/{deviceId}/deactivate")]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> DeactivateByDeviceId(long deviceId)
-    {
-        try
-        {
-            var result = await _deviceRepo.DeactivateByDeviceIdAsync(deviceId);
-
-            return Ok(new HttpResponseData<object>
-            {
-                Success = true,
-                Message = result
-                    ? $"Deactivated all DeviceMessageCombos for Device ID: {deviceId}"
-                    : $"No active DeviceMessageCombos found for Device ID: {deviceId}"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deactivating DeviceMessageCombos by DeviceId: {DeviceId}", deviceId);
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while processing your request",
-                Error = ex.Message
-            });
-        }
-    }
-
-    ///// <summary>
-    ///// Create multiple DeviceMessageCombos in bulk
-    ///// </summary>
-    //[HttpPost("bulk")]
-    //[ProducesResponseType(typeof(HttpResponseData<List<DeviceMessageCombos>>), 201)]
-    //[ProducesResponseType(typeof(HttpResponseData<object>), 400)]
-    //[ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    //public async Task<IActionResult> CreateBulk([FromBody] List<CreateDeviceMessageComboDto> dtos)
-    //{
-    //    try
-    //    {
-    //        if (!ModelState.IsValid || dtos == null || !dtos.Any())
-    //        {
-    //            return BadRequest(new HttpResponseData<object>
-    //            {
-    //                Success = false,
-    //                Message = "Invalid request data or empty list"
-    //            });
-    //        }
-
-    //        var result = await _deviceRepo.CreateBulkAsync(dtos);
-
-    //        return CreatedAtAction(nameof(GetAll), null,
-    //            new HttpResponseData<List<DeviceMessageCombos>>
-    //            {
-    //                Results = result,
-    //                Success = true,
-    //                Message = $"Created {result.Count} DeviceMessageCombos successfully"
-    //            });
-    //    }
-    //    catch (Exception ex)
-    //    {
-    //        _logger.LogError(ex, "Error creating bulk DeviceMessageCombos");
-    //        return StatusCode(500, new HttpResponseData<object>
-    //        {
-    //            Success = false,
-    //            Message = "An error occurred while creating bulk DeviceMessageCombos",
-    //            Error = ex.Message
-    //        });
-    //    }
-    //}
-
-    /// <summary>
-    /// Create multiple DeviceMessageCombos in bulk
-    /// </summary>
-    [Authorize(Roles = "Admin,Manager")]
-    [HttpPost("messagecombo/bulk")]
-    [ProducesResponseType(typeof(HttpResponseData<DeviceMessageCombos>), 201)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> CreateBulk([FromBody] List<CreateDeviceMessageComboDto> dtos)
-    {
-        try
-        {
-            if (!ModelState.IsValid || dtos == null || !dtos.Any())
-            {
-                return BadRequest(new HttpResponseData<object>
-                {
-                    Success = false,
-                    Message = "Invalid request data or empty list"
-                });
-            }
-
-            var result = await _deviceRepo.CreateBulkAsync(dtos);
-            var resutIds = result.Select(r => r.Id).ToList();
-            return CreatedAtAction(nameof(GetAll), null,
-                new HttpResponseData<DeviceMessageCombos>
-                {
-                    Results = result,
-                    Success = true,
-                    Message = $"Created {result.Count} DeviceMessageCombos successfully"
-                });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating bulk DeviceMessageCombos");
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while creating bulk DeviceMessageCombos",
-                Error = ex.Message
-            });
-        }
-    }
-
-
-    /// <summary>
-    /// Deactivate multiple DeviceMessageCombos
-    /// </summary>
-    [Authorize(Roles = "Admin,Manager")]
-    [HttpPut("messagecombo/deactivate-multiple")]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> DeactivateMultiple([FromBody] List<long> ids)
-    {
-        try
-        {
-            if (ids == null || !ids.Any())
-            {
-                return BadRequest(new HttpResponseData<object>
-                {
-                    Success = false,
-                    Message = "No IDs provided"
-                });
-            }
-
-            var result = await _deviceRepo.DeactivateMultipleAsync(ids);
-
-            return Ok(new HttpResponseData<object>
-            {
-                Success = true,
-                Message = result
-                    ? $"Deactivated {ids.Count} DeviceMessageCombos"
-                    : "No active DeviceMessageCombos found with the provided IDs"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deactivating multiple DeviceMessageCombos");
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while deactivating DeviceMessageCombos",
-                Error = ex.Message
-            });
-        }
-    }
-
-    [Authorize(Roles = "Admin,Manager")]
-    [HttpDelete("messagecombo/{id}/user/{userId}")]
-    [ProducesResponseType(typeof(HttpResponseData<bool>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> DeleteMessageCombo(long id, int userId)
-    {
-        try
-        {
-            var (success, message) = await _deviceRepo.DeleteMessageComboAsync(id, userId);
-
-            if (!success)
-            {
-                // Cannot delete due to active combos
-                return Ok(new HttpResponseData<bool>
-                {
-                    Success = false,
-                    Message = message,
-                    Result = false
-                });
-            }
-
-            return Ok(new HttpResponseData<bool>
-            {
-                Success = true,
-                Message = message,
-                Result = true
-            });
-        }
-        catch (KeyNotFoundException ex)
-        {
-            _logger.LogWarning(ex, "Message combo not found for deletion");
-            return NotFound(new HttpResponseData<object>
-            {
-                Success = false,
-                Message = ex.Message
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting message combo ID: {Id}", id);
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while deleting the message combo",
-                Error = ex.Message
-            });
-        }
-    }
-    #endregion
+    // The device-message combination endpoints were removed: assigning standalone
+    // promotional messages to a device is not part of the Minew-only scope. The
+    // DeviceMessageCombos model, table and repository methods are intentionally left
+    // in place - DeviceAssignment still carries a 'MESSAGE' assignment type, and a
+    // Minew template can still render a message image via goodsMap["image"].
 
 
     #region Combination Assignments(to shelf or product) Handlers 
     // ============ ASSIGNMENTS (Using DeviceTemplateAssignment Table) ============
+    /// <summary>
+    /// Attaches a combo to a product, shelf or aisle. Creating a product with
+    /// eslAssignments does this for you - this endpoint is for attaching to a shelf or
+    /// aisle, or repairing an assignment by hand.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("assignments")]
     [ProducesResponseType(typeof(HttpResponseData<AssignmentDto>), 200)]
@@ -3644,6 +3209,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Paged list of assignments across all locations.
+    /// </summary>
     [HttpGet("assignments/paged")]
     [ProducesResponseType(typeof(HttpResponseData<PagedResult<AssignmentViewModel>>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -3677,6 +3245,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Assignments for one location. LocationType is Product, Shelf or Aisle.
+    /// </summary>
     [HttpGet("assignments/{locationType}/{locationId}")]
     [ProducesResponseType(typeof(HttpResponseData<List<AssignmentDto>>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -3715,6 +3286,9 @@ public class DeviceController : ControllerBase
     }
 
 
+    /// <summary>
+    /// Changes the display order when several labels serve the same location.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPut("assignments/{id}/order")]
     [ProducesResponseType(typeof(HttpResponseData<AssignmentDto>), 200)]
@@ -3764,6 +3338,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Removes an assignment and unbinds the label in the vendor cloud, so it stops
+    /// showing stale data. A cloud failure is logged but does not block the local removal.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpDelete("assignments/{id}")]
     [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
@@ -3877,6 +3455,9 @@ public class DeviceController : ControllerBase
     //    }
     //}
 
+    /// <summary>
+    /// Paged version of the per-location assignment list.
+    /// </summary>
     [HttpGet("assignments/{locationType}/{locationId}/paged")]
     [ProducesResponseType(typeof(HttpResponseData<PagedResult<AssignmentViewModel>>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -3924,6 +3505,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Paged device list with filtering and search.
+    /// </summary>
     [HttpGet("devices/paged")]
     [ProducesResponseType(typeof(HttpResponseData<PagedResult<DeviceDto>>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -3957,6 +3541,9 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Paged template list with filtering and search.
+    /// </summary>
     [HttpGet("templates/paged")]
     [ProducesResponseType(typeof(HttpResponseData<PagedResult<TemplateDto>>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
@@ -4030,6 +3617,10 @@ public class DeviceController : ControllerBase
 
     // ============ BIND DATA ============
 
+    /// <summary>
+    /// Renders what a label would show for a given template and product without sending
+    /// anything to the hardware. Useful for checking a template before binding.
+    /// </summary>
     [HttpPost("bind/test-preview")]
     public async Task<IActionResult> TestBindPreview([FromBody] TestBindRequest request)
     {
@@ -4075,6 +3666,16 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Forces a label to re-render a product it is already assigned to.
+    /// 
+    /// Not normally needed - creating or updating a product with ESL assignments binds the
+    /// label automatically. Use this to repaint a label that was offline at bind time, or
+    /// after changing a template outside the product flow.
+    /// 
+    /// ComboId is the DeviceTemplateComboId from GET /api/products/by-code/{productCode}.
+    /// Supply either ProductId (the data is built from the product) or an explicit GoodsMap.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind")]
     public async Task<IActionResult> BindData([FromBody] BindDataRequest request)
@@ -4120,10 +3721,19 @@ public class DeviceController : ControllerBase
 
             var provider = _eslProviderFactory.GetProvider(combo.Device.DeviceType ?? "Minew");
 
+            // The cloud keys on its own store id, not ours. This sent the local
+            // StoreId (e.g. 3), so every call came back 门店不存在 - "store does not
+            // exist" - and this endpoint never bound anything.
+            var bindStore = await _context.StoreMaster
+                .FirstOrDefaultAsync(s => s.Id == combo.Device.StoreId);
+
+            if (bindStore == null || string.IsNullOrEmpty(bindStore.MinewStoreId))
+                return BadRequest(new { message = "Store has no MinewStoreId - the label cannot be bound in the cloud." });
+
             // Prepare bind request for the vendor's cloud API
             var bindRequest = new
             {
-                storeId = combo.Device.StoreId,
+                storeId = bindStore.MinewStoreId,
                 labelMac = combo.Device.MACAddress,
                 goodsMap = goodsMap,
                 demoIdMap = new Dictionary<string, string>
@@ -4163,6 +3773,13 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Binds a label from either a template combo or a message combo.
+    /// 
+    /// A message combo carries a device and a message but no template, and a Minew bind
+    /// cannot render without one - so this resolves the device's own template combo and
+    /// uses the message as the image.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind-unified")]
     public async Task<IActionResult> BindDataUnified([FromBody] UnifiedBindDataRequest request)
@@ -4366,6 +3983,10 @@ public class DeviceController : ControllerBase
     }
   
 
+    /// <summary>
+    /// Binds a shelf-level message to a label, rendering the message image over the
+    /// combo's template.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind-shelf")]
     public async Task<IActionResult> BindShelfData([FromBody] BindShelfDataRequest request)
@@ -4476,6 +4097,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Binds a product to a label using the product's own data - a thin wrapper over
+    /// POST /api/device/bind that builds the goods map for you.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind/quick-product")]
     public async Task<IActionResult> QuickBindProduct([FromBody] QuickBindRequest request)
@@ -4522,6 +4147,10 @@ public class DeviceController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Binds many labels in one call, reporting success or failure per row rather than
+    /// aborting the batch on the first problem.
+    /// </summary>
     [Authorize(Roles = "Admin,Manager")]
     [HttpPost("bind/batch")]
     public async Task<IActionResult> BatchBind([FromBody] BatchBindRequest request)

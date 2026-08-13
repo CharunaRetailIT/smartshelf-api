@@ -27,6 +27,12 @@ namespace TERMS_LOYALTY_API.Interface
         Task<string> BuildUnsyncedProductsJsonAsync(string storeId, string? opcode);
         Task<IEnumerable<ProductMaster>> GetUnsyncedProductList(long? storeId);
 
+        // External integration (lookup by id/code with ESL data, JSON bulk load)
+        Task<ProductDetailDto> GetProductDetailAsync(long? productId, string productCode, long storeId);
+        Task<List<ProductEslDto>> GetEslDevicesForProductAsync(long productId, long storeId);
+        Task<ProductMaster> BulkCreateProductAsync(BulkProductCreateItem item, long storeId, int userId);
+        Task<ProductMaster> BulkUpdateProductAsync(BulkProductUpdateItem item, long storeId, int userId);
+
 
         // Category Operations
         Task<(IEnumerable<ProductCategory> Categories, int TotalCount)> GetActiveCategoriesAsync(int pageNumber = 1, int pageSize = 10, string searchTerm = "", long? storeId = null);

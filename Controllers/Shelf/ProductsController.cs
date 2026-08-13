@@ -32,13 +32,15 @@ namespace TERMS_LOYALTY_API.Controllers
         private readonly IStore _storeRepo;
         private readonly ILogger<ProductsController> _logger;
         private readonly MinewCloudService _minewCloudService;
+        private readonly EslBindingService _eslBinding;
 
-        public ProductsController(ILogger<ProductsController> logger, IProduct product, IStore store, MinewCloudService minewService)
+        public ProductsController(ILogger<ProductsController> logger, IProduct product, IStore store, MinewCloudService minewService, EslBindingService eslBinding)
         {
             _logger = logger;
             _productRepo = product;
             _minewCloudService= minewService;
             _storeRepo = store;
+            _eslBinding = eslBinding;
         }
 
         #region Product Handlers
@@ -317,10 +319,25 @@ namespace TERMS_LOYALTY_API.Controllers
                 //minew update
                 await UpdateProductInMinew(product);
 
+                // Saving the assignment only records intent - without this the label
+                // keeps showing whatever it showed before. Removing an assignment has
+                // always unbound the label automatically, so this is the matching half.
+                var bindSummary = (string)null;
+                if (request.BindToEsl)
+                {
+                    var (_, _, summary) = await _eslBinding.BindAssignmentsAsync(
+                        product.Id,
+                        (request.EslAssignments ?? new List<EslAssignmentIntent>())
+                            .Select(a => (a.DeviceId, a.TemplateId, a.IsDeleted)));
+                    bindSummary = summary;
+                }
+
                 response.Success = true;
                 response.Message = id.HasValue
                     ? "Product and ESL assignments updated successfully."
                     : "Product and ESL assignments created successfully.";
+                if (!string.IsNullOrEmpty(bindSummary))
+                    response.Message += " " + bindSummary;
                 response.Result = new ProductResponseDto
                 {
                     Id = product.Id,
@@ -895,7 +912,356 @@ namespace TERMS_LOYALTY_API.Controllers
                 return Problem(title: response.Message, detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
             }
         }
-       
+
+        #region External integration - lookup + JSON bulk
+
+        /// <summary>
+        /// Full product record for a product code, including every ESL bound to
+        /// it. Product codes are unique per store, so storeId is required.
+        /// </summary>
+        [HttpGet("by-code/{productCode}")]
+        [ProducesResponseType(typeof(HttpResponseData<ProductDetailDto>), 200)]
+        [ProducesResponseType(typeof(HttpResponseData<ProductDetailDto>), 404)]
+        [ProducesResponseType(typeof(HttpResponseData<ProductDetailDto>), 500)]
+        public async Task<IActionResult> GetByProductCodeAsync(string productCode, [FromQuery] long storeId)
+        {
+            return await GetProductDetailResponseAsync(null, productCode, storeId,
+                $"Product code '{productCode}' not found in store {storeId}.");
+        }
+
+        /// <summary>
+        /// Same payload as by-code, keyed on the internal product id.
+        /// </summary>
+        [HttpGet("{id:long}/details")]
+        [ProducesResponseType(typeof(HttpResponseData<ProductDetailDto>), 200)]
+        [ProducesResponseType(typeof(HttpResponseData<ProductDetailDto>), 404)]
+        [ProducesResponseType(typeof(HttpResponseData<ProductDetailDto>), 500)]
+        public async Task<IActionResult> GetProductDetailsAsync(long id, [FromQuery] long storeId)
+        {
+            return await GetProductDetailResponseAsync(id, null, storeId,
+                $"Product ID {id} not found in store {storeId}.");
+        }
+
+        private async Task<IActionResult> GetProductDetailResponseAsync(long? id, string productCode, long storeId, string notFoundMessage)
+        {
+            var response = new HttpResponseData<ProductDetailDto>();
+            try
+            {
+                var product = await _productRepo.GetProductDetailAsync(id, productCode, storeId);
+                if (product == null)
+                {
+                    response.Success = false;
+                    response.Message = notFoundMessage;
+                    response.ResponsCode = 404;
+                    return NotFound(response);
+                }
+
+                response.Success = true;
+                response.Message = "Product retrieved successfully.";
+                response.Result = product;
+                response.ResponsCode = 200;
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving product detail (id={ProductId}, code={ProductCode}, store={StoreId})", id, productCode, storeId);
+                response.Success = false;
+                response.Message = "Failed to retrieve product.";
+                response.Error = ex.Message;
+                response.ResponsCode = 500;
+                return Problem(title: response.Message, detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+            }
+        }
+
+        /// <summary>
+        /// Creates many products from a single JSON payload, optionally with their
+        /// ESL bindings. Rows are independent: a row that fails validation is
+        /// reported with a reason and the rest of the batch still lands.
+        /// Prices are pushed to the labels as part of this call - there is no
+        /// second endpoint to fire.
+        /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
+        [HttpPost("bulk")]
+        [ProducesResponseType(typeof(HttpResponseData<BulkOperationResultDto>), 200)]
+        [ProducesResponseType(typeof(HttpResponseData<BulkOperationResultDto>), 400)]
+        [ProducesResponseType(typeof(HttpResponseData<BulkOperationResultDto>), 500)]
+        public async Task<IActionResult> BulkCreateProducts([FromBody] BulkProductCreateRequest request)
+        {
+            var response = new HttpResponseData<BulkOperationResultDto>();
+
+            if (request?.Products == null || request.Products.Count == 0)
+            {
+                response.Success = false;
+                response.Message = "Products list is required and cannot be empty.";
+                response.ResponsCode = 400;
+                return BadRequest(response);
+            }
+
+            if (request.StoreId <= 0)
+            {
+                response.Success = false;
+                response.Message = "StoreId is required.";
+                response.ResponsCode = 400;
+                return BadRequest(response);
+            }
+
+            try
+            {
+                var result = new BulkOperationResultDto
+                {
+                    StoreId = request.StoreId,
+                    TotalRows = request.Products.Count,
+                };
+
+                var store = await _storeRepo.GetStoreByIdAsync(request.StoreId);
+                if (store == null)
+                {
+                    response.Success = false;
+                    response.Message = $"Store {request.StoreId} not found.";
+                    response.ResponsCode = 400;
+                    return BadRequest(response);
+                }
+
+                for (var i = 0; i < request.Products.Count; i++)
+                {
+                    var item = request.Products[i];
+                    var row = new BulkRowResultDto { Index = i, ProductCode = item?.ProductCode };
+
+                    try
+                    {
+                        var product = await _productRepo.BulkCreateProductAsync(item, request.StoreId, request.UserId);
+                        row.Success = true;
+                        row.ProductId = product.Id;
+                        row.Message = "Created.";
+                        result.Succeeded++;
+
+                        await ApplyEslPushAsync(row, product, store, request.PushToEsl, result);
+
+                        // Push updates the product data; bind is what makes the label
+                        // actually display it. Reported separately because either can
+                        // fail on its own.
+                        if (request.BindToEsl && item.EslAssignments != null && item.EslAssignments.Count > 0)
+                        {
+                            var (bound, failedBinds, summary) = await _eslBinding.BindAssignmentsAsync(
+                                product.Id,
+                                item.EslAssignments.Select(a => (a.DeviceId, a.TemplateId, a.IsDeleted)));
+
+                            result.EslBoundSucceeded += bound;
+                            result.EslBoundFailed += failedBinds;
+
+                            if (bound > 0 || failedBinds > 0)
+                            {
+                                row.EslBound = failedBinds == 0;
+                                row.EslBindMessage = summary;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // One bad row must not cost the caller the other 499.
+                        _logger.LogWarning(ex, "Bulk create row {Index} failed (code={ProductCode})", i, item?.ProductCode);
+                        row.Success = false;
+                        row.Message = ex.Message;
+                        result.Failed++;
+                    }
+
+                    result.Results.Add(row);
+                }
+
+                result.EslSummary = BuildEslSummary(request.PushToEsl, store, result);
+
+                response.Success = result.Failed == 0;
+                response.Message = $"Bulk create finished: {result.Succeeded} created, {result.Failed} failed.";
+                response.Result = result;
+                response.ResponsCode = 200;
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during bulk product create for store {StoreId}", request.StoreId);
+                response.Success = false;
+                response.Message = "Bulk create failed.";
+                response.Error = ex.Message;
+                response.ResponsCode = 500;
+                return Problem(title: response.Message, detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+            }
+        }
+
+        /// <summary>
+        /// Updates many products from a single JSON payload, matching each row on
+        /// ProductCode (or explicit Id) within the store. Fields omitted from a row
+        /// keep their current value, so a price-only feed will not blank anything
+        /// else. Every updated product is pushed to its ESL in the same call.
+        /// </summary>
+        [Authorize(Roles = "Admin,Manager,Operator")]
+        [HttpPut("bulk")]
+        [ProducesResponseType(typeof(HttpResponseData<BulkOperationResultDto>), 200)]
+        [ProducesResponseType(typeof(HttpResponseData<BulkOperationResultDto>), 400)]
+        [ProducesResponseType(typeof(HttpResponseData<BulkOperationResultDto>), 500)]
+        public async Task<IActionResult> BulkUpdateProducts([FromBody] BulkProductUpdateRequest request)
+        {
+            var response = new HttpResponseData<BulkOperationResultDto>();
+
+            if (request?.Products == null || request.Products.Count == 0)
+            {
+                response.Success = false;
+                response.Message = "Products list is required and cannot be empty.";
+                response.ResponsCode = 400;
+                return BadRequest(response);
+            }
+
+            if (request.StoreId <= 0)
+            {
+                response.Success = false;
+                response.Message = "StoreId is required.";
+                response.ResponsCode = 400;
+                return BadRequest(response);
+            }
+
+            try
+            {
+                var result = new BulkOperationResultDto
+                {
+                    StoreId = request.StoreId,
+                    TotalRows = request.Products.Count,
+                };
+
+                var store = await _storeRepo.GetStoreByIdAsync(request.StoreId);
+                if (store == null)
+                {
+                    response.Success = false;
+                    response.Message = $"Store {request.StoreId} not found.";
+                    response.ResponsCode = 400;
+                    return BadRequest(response);
+                }
+
+                for (var i = 0; i < request.Products.Count; i++)
+                {
+                    var item = request.Products[i];
+                    var row = new BulkRowResultDto { Index = i, ProductCode = item?.ProductCode, ProductId = item?.Id };
+
+                    try
+                    {
+                        var product = await _productRepo.BulkUpdateProductAsync(item, request.StoreId, request.UserId);
+                        row.Success = true;
+                        row.ProductId = product.Id;
+                        row.ProductCode = product.ProductCode;
+                        row.Message = "Updated.";
+                        result.Succeeded++;
+
+                        await ApplyEslPushAsync(row, product, store, request.PushToEsl, result);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Bulk update row {Index} failed (code={ProductCode})", i, item?.ProductCode);
+                        row.Success = false;
+                        row.Message = ex.Message;
+                        result.Failed++;
+                    }
+
+                    result.Results.Add(row);
+                }
+
+                result.EslSummary = BuildEslSummary(request.PushToEsl, store, result);
+
+                response.Success = result.Failed == 0;
+                response.Message = $"Bulk update finished: {result.Succeeded} updated, {result.Failed} failed.";
+                response.Result = result;
+                response.ResponsCode = 200;
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during bulk product update for store {StoreId}", request.StoreId);
+                response.Success = false;
+                response.Message = "Bulk update failed.";
+                response.Error = ex.Message;
+                response.ResponsCode = 500;
+                return Problem(title: response.Message, detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+            }
+        }
+
+        /// <summary>
+        /// Pushes one saved product to Minew and records the outcome on its row.
+        /// Deliberately per-product: Minew's batch goods/update carries no price
+        /// field, so only goods/updateToStore actually moves a price onto a label.
+        /// A push failure never fails the row - the data is already committed.
+        /// </summary>
+        private async Task ApplyEslPushAsync(BulkRowResultDto row, ProductMaster product, StoreMaster store, bool pushToEsl, BulkOperationResultDto result)
+        {
+            if (!pushToEsl)
+                return;
+
+            if (store == null || string.IsNullOrEmpty(store.MinewStoreId))
+            {
+                row.EslPushed = false;
+                row.EslMessage = "Store has no MinewStoreId - saved to database only.";
+                result.EslPushFailed++;
+                return;
+            }
+
+            try
+            {
+                var updateRequest = new MinewUpdateProductRequest
+                {
+                    id = product.Id.ToString(),
+                    storeId = store.MinewStoreId,
+                    price = product.SellingPrice.ToString("0.00"),
+                    barcode = product.BarCode ?? "",
+                    p_name = product.ProductName,
+                    p_code = product.ProductCode ?? "",
+                    discount = product.DiscountPrice.ToString("0.00"),
+                    qrcode = "http://minewtag.com",
+                    specification = "2.9",
+                    unit = "001f",
+                    memberPrice = "",
+                    origin = "",
+                    image = "",
+                    barcoode = product.BarCode ?? ""
+                };
+
+                var minewResult = await _minewCloudService.UpdateProductInStoreAsync(updateRequest);
+
+                if (minewResult?.code == 200)
+                {
+                    row.EslPushed = true;
+                    row.EslMessage = "Pushed to ESL.";
+                    result.EslPushSucceeded++;
+                }
+                else
+                {
+                    row.EslPushed = false;
+                    row.EslMessage = minewResult?.msg ?? minewResult?.message ?? "Unknown Minew error.";
+                    result.EslPushFailed++;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ESL push failed for product {ProductId} in bulk operation", product.Id);
+                row.EslPushed = false;
+                row.EslMessage = ex.Message;
+                result.EslPushFailed++;
+            }
+        }
+
+        private static string BuildEslSummary(bool pushToEsl, StoreMaster store, BulkOperationResultDto result)
+        {
+            if (!pushToEsl)
+                return "ESL push skipped (PushToEsl=false). Products saved to database only.";
+
+            if (store == null || string.IsNullOrEmpty(store.MinewStoreId))
+                return "Store is not linked to a Minew store (MinewStoreId is empty), so no prices were pushed to labels.";
+
+            var summary = $"ESL push: {result.EslPushSucceeded} succeeded, {result.EslPushFailed} failed.";
+
+            if (result.EslBoundSucceeded > 0 || result.EslBoundFailed > 0)
+                summary += $" Label bind: {result.EslBoundSucceeded} succeeded, {result.EslBoundFailed} failed.";
+
+            return summary;
+        }
+
+        #endregion
+
         ///// <summary>
         ///// Updates device info for a product.
         ///// </summary>

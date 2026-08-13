@@ -61,6 +61,9 @@ namespace TERMS_LOYALTY_API.Controllers
             }
         }
 
+        /// <summary>
+        /// One shelf together with the labels assigned to it.
+        /// </summary>
         [HttpGet("with-assignments/{id}")]
         [ProducesResponseType(typeof(HttpResponseData<ShelfFullDetails>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 404)]

@@ -30,6 +30,12 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
 
+        /// <summary>
+        /// Applies a loyalty points transaction and returns the customer's new balance.
+        /// 
+        /// Legacy loyalty/ERP surface, unrelated to the SmartShelf ESL feature set. It runs
+        /// against the separate ERP database via its own connection string.
+        /// </summary>
         [HttpPost("UpdateLoyaltyPoints")]
         public async Task<HttpResponseData<ReturnUserDetails>> UpdateLoyaltyPoints(LoyaltyEarnPointUpdate ObjLEP)
         {
@@ -70,6 +76,12 @@ namespace TERMS_LOYALTY_API.Controllers
             return await Task.FromResult(result);
         }
 
+        /// <summary>
+        /// Registers a loyalty customer.
+        /// 
+        /// Legacy loyalty/ERP surface, unrelated to the SmartShelf ESL feature set. It runs
+        /// against the separate ERP database via its own connection string.
+        /// </summary>
         [HttpPost("CreateLoyaltyCustomer")]
         public async Task<HttpResponseData<ReturnUserDetails>> CreateLoyaltyCustomer([FromBody] LoyaltyCustomerRequest loyaltyCustomer)
         {
@@ -96,6 +108,9 @@ namespace TERMS_LOYALTY_API.Controllers
             return await Task.FromResult(result);
         }
 
+        /// <summary>
+        /// Connectivity check - returns a fixed greeting. No data access.
+        /// </summary>
         [HttpGet("employer")]
         public async Task<HttpResponseData<ReturnUserDetails>> employer()
         {
@@ -105,6 +120,12 @@ namespace TERMS_LOYALTY_API.Controllers
             return await Task.FromResult(result);
         }
 
+        /// <summary>
+        /// Loyalty customer record by id.
+        /// 
+        /// Legacy loyalty/ERP surface, unrelated to the SmartShelf ESL feature set. It runs
+        /// against the separate ERP database via its own connection string.
+        /// </summary>
         [HttpGet("GetLoyaltyCustomerDetails/{customerId:long}")]
         public async Task<HttpResponseData<List<LoyaltyCustomerDetails>>> GetLoyaltyCustomerDetails(long customerId)
         {

@@ -328,6 +328,9 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // Update UploadProfileImage method
+        /// <summary>
+        /// Uploads a profile image for the signed-in user. Send as multipart/form-data.
+        /// </summary>
         [HttpPost("me/profile-image")]
         [Authorize]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]
@@ -392,6 +395,9 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // Update UpdateProfile method
+        /// <summary>
+        /// Updates the signed-in user's own profile details.
+        /// </summary>
         [HttpPut("me")]
         [Authorize]
         [ProducesResponseType(typeof(HttpResponseData<object>), 200)]

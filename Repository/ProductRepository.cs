@@ -916,5 +916,272 @@ namespace TERMS_LOYALTY_API.Repository
         }
 
         #endregion
+
+        #region External integration (lookup + bulk)
+
+        public async Task<ProductDetailDto> GetProductDetailAsync(long? productId, string productCode, long storeId)
+        {
+            var query =
+                from pm in _context.ProductMaster
+                join c in _context.ProductCategories on pm.CategoryId equals c.Id into cats
+                from c in cats.DefaultIfEmpty()
+                join sc in _context.ProductSubCategories on pm.SubCategoryId equals sc.Id into subCats
+                from sc in subCats.DefaultIfEmpty()
+                join s in _context.StoreMaster on pm.StoreId equals s.Id into stores
+                from s in stores.DefaultIfEmpty()
+                where pm.StoreId == storeId
+                   && (productId.HasValue ? pm.Id == productId.Value : pm.ProductCode == productCode)
+                select new ProductDetailDto
+                {
+                    Id = pm.Id,
+                    ProductCode = pm.ProductCode,
+                    BarCode = pm.BarCode,
+                    ProductName = pm.ProductName,
+                    CategoryId = pm.CategoryId,
+                    CategoryName = c != null ? c.CategoryName : null,
+                    SubCategoryId = pm.SubCategoryId,
+                    SubCategoryName = sc != null ? sc.SubCategoryName : null,
+                    Quantity = pm.Quantity,
+                    UnitOfMeasure = pm.UnitOfMeasure,
+                    CostPrice = pm.CostPrice,
+                    SellingPrice = pm.SellingPrice,
+                    DiscountPrice = pm.DiscountPrice,
+                    DiscountedPrice = pm.DiscountedPrice,
+                    DiscountPercentage = pm.DiscountPercentage,
+                    WholesalePrice = pm.WholesalePrice,
+                    MinimumPrice = pm.MinimumPrice,
+                    MaximumPrice = pm.MaximumPrice,
+                    Description = pm.Description,
+                    IsActive = pm.IsActive,
+                    IsSyncToCloud = pm.IsSyncToCloud,
+                    StoreId = pm.StoreId,
+                    StoreName = s != null ? s.StoreName : null,
+                    CreatedDate = pm.CreatedDate,
+                    UpdatedDate = pm.UpdatedDate,
+                };
+
+            var product = await query.FirstOrDefaultAsync();
+            if (product == null)
+                return null;
+
+            product.EslDevices = await GetEslDevicesForProductAsync(product.Id, storeId);
+            return product;
+        }
+
+        /// <summary>
+        /// Walks DeviceAssignment (LocationType 'Product') out to the device,
+        /// template and message, and collapses the rows per device: a label bound
+        /// with both a template and a message is one entry with both populated,
+        /// not two near-duplicate entries.
+        /// </summary>
+        public async Task<List<ProductEslDto>> GetEslDevicesForProductAsync(long productId, long storeId)
+        {
+            var assignments = await _context.DeviceAssignment
+                .Where(a => a.LocationType == "Product" && a.LocationId == productId
+                            && a.StoreId == storeId && a.IsActive)
+                .Include(a => a.DeviceTemplateCombo).ThenInclude(c => c.Device).ThenInclude(d => d.Status)
+                .Include(a => a.DeviceTemplateCombo).ThenInclude(c => c.Template)
+                .Include(a => a.DeviceMessageCombo).ThenInclude(c => c.Device).ThenInclude(d => d.Status)
+                .Include(a => a.DeviceMessageCombo).ThenInclude(c => c.Message)
+                .OrderBy(a => a.DisplayOrder)
+                .ToListAsync();
+
+            var byDevice = new Dictionary<long, ProductEslDto>();
+
+            foreach (var assignment in assignments)
+            {
+                var isTemplate = assignment.DeviceTemplateComboId.HasValue;
+                var device = isTemplate
+                    ? assignment.DeviceTemplateCombo?.Device
+                    : assignment.DeviceMessageCombo?.Device;
+
+                // A combo whose device row was hard-deleted leaves a dangling
+                // assignment; there is nothing meaningful to report for it.
+                if (device == null)
+                    continue;
+
+                if (!byDevice.TryGetValue(device.Id, out var entry))
+                {
+                    entry = new ProductEslDto
+                    {
+                        DeviceId = device.Id,
+                        Mac = device.MACAddress,
+                        DeviceName = device.Name,
+                        DeviceType = device.DeviceType,
+                        Status = device.Status?.Name ?? string.Empty,
+                        Battery = device.Battery,
+                        IsOnline = device.IsOnline,
+                        LastSeen = device.LastSeen,
+                        DisplayOrder = assignment.DisplayOrder,
+                    };
+                    byDevice[device.Id] = entry;
+                }
+
+                if (isTemplate)
+                {
+                    entry.TemplateAssignmentId = assignment.Id;
+                    entry.DeviceTemplateComboId = assignment.DeviceTemplateComboId;
+                    entry.TemplateId = assignment.DeviceTemplateCombo?.TemplateId;
+                    entry.TemplateName = assignment.DeviceTemplateCombo?.Template?.Name;
+                }
+                else
+                {
+                    entry.MessageAssignmentId = assignment.Id;
+                    entry.DeviceMessageComboId = assignment.DeviceMessageComboId;
+                    entry.MessageId = assignment.DeviceMessageCombo?.MessageId;
+                    entry.MessageName = assignment.DeviceMessageCombo?.Message?.Title;
+                }
+            }
+
+            return byDevice.Values.ToList();
+        }
+
+        /// <summary>
+        /// Resolves a category by name for callers (POS, ERP) that don't know our
+        /// internal ids. Returns null when the name doesn't match an active
+        /// category in the store, so the caller can fail that row with a reason.
+        /// </summary>
+        private async Task<long?> ResolveCategoryIdAsync(long? categoryId, string categoryName, long storeId)
+        {
+            if (categoryId.HasValue && categoryId.Value > 0)
+                return categoryId;
+
+            if (string.IsNullOrWhiteSpace(categoryName))
+                return null;
+
+            var match = await _context.ProductCategories
+                .FirstOrDefaultAsync(c => c.CategoryName == categoryName && c.IsActive && c.StoreId == storeId);
+
+            return match?.Id;
+        }
+
+        private async Task<long?> ResolveSubCategoryIdAsync(long? subCategoryId, string subCategoryName, long categoryId, long storeId)
+        {
+            if (subCategoryId.HasValue && subCategoryId.Value > 0)
+                return subCategoryId;
+
+            if (string.IsNullOrWhiteSpace(subCategoryName))
+                return null;
+
+            var match = await _context.ProductSubCategories
+                .FirstOrDefaultAsync(sc => sc.SubCategoryName == subCategoryName && sc.IsActive
+                                           && sc.StoreId == storeId && sc.CategoryId == categoryId);
+
+            return match?.Id;
+        }
+
+        /// <summary>
+        /// Creates one row of a bulk payload, including its optional ESL bindings,
+        /// in its own transaction. Per-row rather than per-batch on purpose: a bad
+        /// row rolls back only itself, so the rest of the payload still lands.
+        /// </summary>
+        public async Task<ProductMaster> BulkCreateProductAsync(BulkProductCreateItem item, long storeId, int userId)
+        {
+            if (string.IsNullOrWhiteSpace(item.ProductCode))
+                throw new ArgumentException("ProductCode is required.");
+            if (string.IsNullOrWhiteSpace(item.ProductName))
+                throw new ArgumentException("ProductName is required.");
+
+            var categoryId = await ResolveCategoryIdAsync(item.CategoryId, item.CategoryName, storeId);
+            if (!categoryId.HasValue)
+                throw new ArgumentException($"Category not found (CategoryId={item.CategoryId}, CategoryName='{item.CategoryName}').");
+
+            var subCategoryId = await ResolveSubCategoryIdAsync(item.SubCategoryId, item.SubCategoryName, categoryId.Value, storeId);
+            if (!subCategoryId.HasValue && !string.IsNullOrWhiteSpace(item.SubCategoryName))
+                throw new ArgumentException($"SubCategory '{item.SubCategoryName}' not found under the resolved category.");
+
+            var productData = new ProductEslData
+            {
+                ProductCode = item.ProductCode,
+                BarCode = item.BarCode,
+                ProductName = item.ProductName,
+                CategoryId = categoryId.Value,
+                SubCategoryId = subCategoryId,
+                Quantity = item.Quantity,
+                UnitOfMeasure = item.UnitOfMeasure ?? string.Empty,
+                CostPrice = item.CostPrice,
+                SellingPrice = item.SellingPrice,
+                DiscountPrice = item.DiscountPrice,
+                DiscountedPrice = item.DiscountedPrice,
+                DiscountPercentage = item.DiscountPercentage,
+                WholesalePrice = item.WholesalePrice,
+                MinimumPrice = item.MinimumPrice,
+                MaximumPrice = item.MaximumPrice,
+                Description = item.Description,
+                IsActive = item.IsActive,
+                StoreId = storeId,
+            };
+
+            // Reuses the same transactional path as POST /with-esl, so a bulk row
+            // and a single create cannot drift apart in behaviour.
+            return await SaveProductWithEslAsync(null, productData, item.EslAssignments, userId);
+        }
+
+        /// <summary>
+        /// Applies one row of a bulk update. Fields left null in the payload keep
+        /// their current value - a price-only feed must not blank descriptions.
+        /// </summary>
+        public async Task<ProductMaster> BulkUpdateProductAsync(BulkProductUpdateItem item, long storeId, int userId)
+        {
+            if (!item.Id.HasValue && string.IsNullOrWhiteSpace(item.ProductCode))
+                throw new ArgumentException("Either Id or ProductCode is required to match the product.");
+
+            var product = item.Id.HasValue
+                ? await _context.ProductMaster.FirstOrDefaultAsync(p => p.Id == item.Id.Value && p.StoreId == storeId)
+                : await _context.ProductMaster.FirstOrDefaultAsync(p => p.ProductCode == item.ProductCode && p.StoreId == storeId);
+
+            if (product == null)
+                throw new ArgumentException(item.Id.HasValue
+                    ? $"Product Id {item.Id.Value} not found in store {storeId}."
+                    : $"Product code '{item.ProductCode}' not found in store {storeId}.");
+
+            if (item.CategoryId.HasValue || !string.IsNullOrWhiteSpace(item.CategoryName))
+            {
+                var categoryId = await ResolveCategoryIdAsync(item.CategoryId, item.CategoryName, storeId);
+                if (!categoryId.HasValue)
+                    throw new ArgumentException($"Category not found (CategoryId={item.CategoryId}, CategoryName='{item.CategoryName}').");
+                product.CategoryId = categoryId.Value;
+            }
+
+            if (item.SubCategoryId.HasValue || !string.IsNullOrWhiteSpace(item.SubCategoryName))
+            {
+                var subCategoryId = await ResolveSubCategoryIdAsync(item.SubCategoryId, item.SubCategoryName, product.CategoryId, storeId);
+                if (!subCategoryId.HasValue)
+                    throw new ArgumentException($"SubCategory not found (SubCategoryId={item.SubCategoryId}, SubCategoryName='{item.SubCategoryName}').");
+
+                var subCategory = await _context.ProductSubCategories
+                    .FirstOrDefaultAsync(sc => sc.Id == subCategoryId.Value && sc.IsActive && sc.StoreId == storeId);
+                if (subCategory == null)
+                    throw new ArgumentException("Invalid subcategory ID");
+                if (subCategory.CategoryId != product.CategoryId)
+                    throw new ArgumentException("Subcategory does not belong to the specified category");
+
+                product.SubCategoryId = subCategoryId;
+            }
+
+            if (item.BarCode != null) product.BarCode = item.BarCode;
+            if (item.ProductName != null) product.ProductName = item.ProductName;
+            if (item.UnitOfMeasure != null) product.UnitOfMeasure = item.UnitOfMeasure;
+            if (item.Description != null) product.Description = item.Description;
+
+            if (item.Quantity.HasValue) product.Quantity = item.Quantity.Value;
+            if (item.CostPrice.HasValue) product.CostPrice = item.CostPrice.Value;
+            if (item.SellingPrice.HasValue) product.SellingPrice = item.SellingPrice.Value;
+            if (item.DiscountPrice.HasValue) product.DiscountPrice = item.DiscountPrice.Value;
+            if (item.DiscountedPrice.HasValue) product.DiscountedPrice = item.DiscountedPrice.Value;
+            if (item.DiscountPercentage.HasValue) product.DiscountPercentage = item.DiscountPercentage.Value;
+            if (item.WholesalePrice.HasValue) product.WholesalePrice = item.WholesalePrice.Value;
+            if (item.MinimumPrice.HasValue) product.MinimumPrice = item.MinimumPrice.Value;
+            if (item.MaximumPrice.HasValue) product.MaximumPrice = item.MaximumPrice.Value;
+            if (item.IsActive.HasValue) product.IsActive = item.IsActive.Value;
+
+            product.UpdatedDate = DateTime.Now;
+            product.UpdatedUser = userId;
+
+            await _context.SaveChangesAsync();
+            return product;
+        }
+
+        #endregion
     }
 }

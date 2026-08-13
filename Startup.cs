@@ -27,7 +27,6 @@ using TERMS_LOYALTY_API.Models;
 using TERMS_LOYALTY_API.Repository;
 using TERMS_LOYALTY_API.Services;
 using TERMS_LOYALTY_API.Services.Providers;
-using TERMS_LOYALTY_API.SignalRHubs;
 using TERMS_MOBILE_WEB_API.Interface;
 using TERMS_MOBILE_WEB_API.Models;
 using TERMS_MOBILE_WEB_API.Repository;
@@ -78,6 +77,7 @@ namespace TERMS_MOBILE_WEB_API
             services.AddSingleton<MinewCloudService>();
             services.AddScoped<IEslProvider, MinewEslProvider>();
             services.AddScoped<IEslProviderFactory, EslProviderFactory>();
+            services.AddScoped<EslBindingService>();
             services.AddScoped<IStore, StoreRepository>();
             services.AddScoped<IDevice, DeviceRepository>();
             services.AddScoped<IDashboard, DashboardRepository>();
@@ -140,7 +140,6 @@ namespace TERMS_MOBILE_WEB_API
                         )
                         .AllowAnyMethod()
                         .AllowAnyHeader()
-                        .AllowCredentials()               // Keep this for SignalR if needed
                         .SetIsOriginAllowedToAllowWildcardSubdomains();
                 });
             });
@@ -149,7 +148,6 @@ namespace TERMS_MOBILE_WEB_API
 
             services.AddHttpContextAccessor();
 
-            services.AddSignalR();
 
 
             //services.AddCors();
@@ -183,9 +181,30 @@ namespace TERMS_MOBILE_WEB_API
             {
                 c.SwaggerDoc("v1", new OpenApiInfo
                 {
-                    Title = "TERMS_MOBILE_WEB_API",
-                    Version = "v1"
+                    Title = "SmartShelf ESL API",
+                    Version = "v1",
+                    Description =
+                        "Product and electronic-shelf-label integration for SmartShelf (Minew).\n\n" +
+                        "**Getting started** - call `POST /api/auth/login` with your *Employee ID* " +
+                        "(not your email address), then click **Authorize** above and paste the token.\n\n" +
+                        "**Everything is scoped to a store.** Product codes are unique per store, not " +
+                        "globally, so `storeId` is required on product lookups and bulk payloads.\n\n" +
+                        "**Prices reach the labels as part of the call that changes them.** Creating or " +
+                        "updating a product also binds its labels and pushes the price - there is no " +
+                        "separate sync or publish endpoint to fire afterwards.\n\n" +
+                        "**Bulk endpoints report per row.** They answer 200 even when some rows fail; " +
+                        "read `result.results[]` rather than the status code alone.\n\n" +
+                        "**Scheduling times are UTC.** Sri Lanka is UTC+5:30, so a 3:00pm local " +
+                        "promotion is sent as 09:30."
                 });
+
+                // Surfaces the <summary> blocks from the controllers and DTOs. Guarded
+                // because the file only exists once GenerateDocumentationFile is set,
+                // and a missing file would throw at startup rather than degrade.
+                var xmlPath = Path.Combine(AppContext.BaseDirectory,
+                    $"{Assembly.GetExecutingAssembly().GetName().Name}.xml");
+                if (File.Exists(xmlPath))
+                    c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
 
                 // 🔐 Enable JWT Bearer Authorization in Swagger
                 c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -284,7 +303,8 @@ namespace TERMS_MOBILE_WEB_API
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
-                c.SwaggerEndpoint("/swagger/v1/swagger.json", "TERMS_MOBILE_WEB_API v1");
+                c.SwaggerEndpoint("/swagger/v1/swagger.json", "SmartShelf ESL API v1");
+                c.DocumentTitle = "SmartShelf ESL API";
                 c.RoutePrefix = "swagger"; // optional, default
             });
 
@@ -311,7 +331,6 @@ namespace TERMS_MOBILE_WEB_API
                     return Task.CompletedTask;
                 });
 
-                endpoints.MapHub<DeviceAssignmentHub>("/deviceHub");
                 endpoints.MapControllers();
             });
             //app.UseSwagger();
