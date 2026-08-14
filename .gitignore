@@ -66,3 +66,6 @@ nunit-*.xml
 test-results/
 # Draft PR descriptions, not part of the deliverable
 postman/PR_BODY.md
+# Visual Studio publish profiles point at local machine paths
+# (D:\Publish\..., D:\apinew) and are not reusable by teammates.
+Properties/PublishProfiles/*.pubxml
