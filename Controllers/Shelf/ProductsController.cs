@@ -169,7 +169,9 @@ namespace TERMS_LOYALTY_API.Controllers
                 response.Message = "Product created successfully.";
                 response.Result = resultDto;
                 response.ResponsCode = 201;
-                return Ok(response);
+                // 201 on the status line too, not just in the body - the document
+                // and the ProducesResponseType above both promise a real 201.
+                return StatusCode(201, response);
             }
             catch (ArgumentException ex)
             {
@@ -198,13 +200,13 @@ namespace TERMS_LOYALTY_API.Controllers
         /// </summary>
         [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPut("product/{id}")]
-        [ProducesResponseType(typeof(HttpResponseData<UpdateProductResponse>), 200)]
-        [ProducesResponseType(typeof(HttpResponseData<UpdateProductResponse>), 400)]
-        [ProducesResponseType(typeof(HttpResponseData<UpdateProductResponse>), 404)]
-        [ProducesResponseType(typeof(HttpResponseData<UpdateProductResponse>), 500)]
+        [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 200)]
+        [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 400)]
+        [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 404)]
+        [ProducesResponseType(typeof(HttpResponseData<ProductResponseDto>), 500)]
         public async Task<IActionResult> UpdateProduct(long id, [FromBody] UpdateProductDto updateDto)
         {
-            var response = new HttpResponseData<UpdateProductResponse>();
+            var response = new HttpResponseData<ProductResponseDto>();
             try
             {
                 var existingProduct = await _productRepo.GetProductByIdAsync(id,updateDto.StoreId);
@@ -240,21 +242,45 @@ namespace TERMS_LOYALTY_API.Controllers
                 //    StoreId = updateDto.StoreId,
                 //};
 
-                var updatedProduct = await _productRepo.UpdateProductAsync(id,updateDto);
-                
+                // Part 4.3 replaces the record, as the document specifies.
+                var updatedProduct = await _productRepo.UpdateProductAsync(id, updateDto, replaceOmittedFields: true);
+
 
                 //minew update
                await UpdateProductInMinew(updatedProduct);
 
-                return Ok(new UpdateProductResponse
+                // The product goes out under "result", in the same envelope every
+                // other endpoint uses. It used to sit flat at the top level, so a
+                // client built from the document - or the web portal, which reads
+                // response.result - found nothing where the product should be.
+                response.Success = true;
+                response.Message = "Product updated successfully.";
+                response.ResponsCode = 200;
+                response.Result = new ProductResponseDto
                 {
-                    Success = true,
-                    Message = "Product updated successfully.",
-                    ResponsCode = 200,
-                    ProductId = updatedProduct.Id,
+                    Id = updatedProduct.Id,
+                    ProductCode = updatedProduct.ProductCode,
+                    BarCode = updatedProduct.BarCode,
                     ProductName = updatedProduct.ProductName,
-                    ProductCode = updatedProduct.ProductCode
-                });
+                    CategoryId = updatedProduct.CategoryId,
+                    SubCategoryId = updatedProduct.SubCategoryId,
+                    Quantity = updatedProduct.Quantity,
+                    UnitOfMeasure = updatedProduct.UnitOfMeasure,
+                    CostPrice = updatedProduct.CostPrice,
+                    SellingPrice = updatedProduct.SellingPrice,
+                    DiscountPrice = updatedProduct.DiscountPrice,
+                    DiscountedPrice = updatedProduct.DiscountedPrice,
+                    DiscountPercentage = updatedProduct.DiscountPercentage,
+                    WholesalePrice = updatedProduct.WholesalePrice,
+                    MinimumPrice = updatedProduct.MinimumPrice,
+                    MaximumPrice = updatedProduct.MaximumPrice,
+                    Description = updatedProduct.Description,
+                    IsActive = updatedProduct.IsActive,
+                    StoreId = updatedProduct.StoreId,
+                    CreatedDate = updatedProduct.CreatedDate,
+                    CreatedUser = updatedProduct.CreatedUser
+                };
+                return Ok(response);
             }
             catch (ArgumentException ex)
             {
@@ -362,8 +388,9 @@ namespace TERMS_LOYALTY_API.Controllers
                     CreatedDate = product.CreatedDate,
                     CreatedUser = product.CreatedUser,
                 };
+                // A create answers 201 on the status line, an update 200.
                 response.ResponsCode = id.HasValue ? 200 : 201;
-                return Ok(response);
+                return id.HasValue ? Ok(response) : StatusCode(201, response);
             }
             catch (ArgumentException ex)
             {

@@ -15,7 +15,7 @@ namespace TERMS_LOYALTY_API.Interface
         Task<(IEnumerable<ProductViewDto> Products, int TotalCount)> GetAllProductsAsync(int pageNumber = 1, int pageSize = 10, long? storeId = null, long? categoryId = null, long? subcategoryId = null, string searchTerm = "");
         Task<ProductMaster> CreateProductAsync(ProductMaster product);
         Task<ProductMaster> UpdateProductAsync(ProductMaster product);
-        Task<ProductMaster> UpdateProductAsync(long id, UpdateProductDto dto);
+        Task<ProductMaster> UpdateProductAsync(long id, UpdateProductDto dto, bool replaceOmittedFields);
         Task<ProductMaster> SaveProductWithEslAsync(long? productId, ProductEslData productData, List<EslAssignmentIntent> assignments, int userId);
         Task<bool> DeleteProductAsync(long id, long? storeId);
         Task<bool> ProductExistsAsync(string productCode, long? storeId);

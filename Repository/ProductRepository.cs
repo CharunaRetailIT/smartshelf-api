@@ -233,7 +233,13 @@ namespace TERMS_LOYALTY_API.Repository
             }
         }
 
-        public async Task<ProductMaster> UpdateProductAsync(long id, UpdateProductDto dto)
+        /// <summary>
+        /// Applies an update to one product. <paramref name="replaceOmittedFields"/>
+        /// picks the semantics the caller is documented to have: true resets a field
+        /// the caller left out to its default (Part 4.3), false keeps the stored
+        /// value (Part 4.4). No default on purpose - the wrong one loses data.
+        /// </summary>
+        public async Task<ProductMaster> UpdateProductAsync(long id, UpdateProductDto dto, bool replaceOmittedFields)
         {
             try
             {
@@ -241,12 +247,18 @@ namespace TERMS_LOYALTY_API.Repository
                 if (existingProduct == null)
                     throw new ArgumentException("Product not found");
 
-                // Verify category and subcategory exist and are active
-                var category = await _context.ProductCategories
-                    .FirstOrDefaultAsync(c => c.Id == dto.CategoryId && c.IsActive && c.StoreId == dto.StoreId);
+                // A category the caller did not send means "keep the current one",
+                // so validate against whichever category the product ends up in.
+                var effectiveCategoryId = dto.CategoryId ?? existingProduct.CategoryId;
 
-                if (category == null)
-                    throw new ArgumentException("Invalid category ID");
+                if (dto.CategoryId.HasValue)
+                {
+                    var category = await _context.ProductCategories
+                        .FirstOrDefaultAsync(c => c.Id == dto.CategoryId && c.IsActive && c.StoreId == dto.StoreId);
+
+                    if (category == null)
+                        throw new ArgumentException("Invalid category ID");
+                }
 
                 if (dto.SubCategoryId != null && dto.SubCategoryId != 0)
                 {
@@ -257,29 +269,65 @@ namespace TERMS_LOYALTY_API.Repository
                         throw new ArgumentException("Invalid subcategory ID");
 
                     // Verify subcategory belongs to category
-                    if (subCategory.CategoryId != dto.CategoryId)
+                    if (subCategory.CategoryId != effectiveCategoryId)
                         throw new ArgumentException("Subcategory does not belong to the specified category");
                 }
 
-                existingProduct.ProductCode = dto.ProductCode;
-                existingProduct.BarCode = dto.BarCode;
-                existingProduct.ProductName = dto.ProductName;
-                existingProduct.Quantity = dto.Quantity;
-                existingProduct.UnitOfMeasure = dto.UnitOfMeasure;
-                existingProduct.CategoryId = dto.CategoryId;
-                existingProduct.SubCategoryId = dto.SubCategoryId == 0 ? null : dto.SubCategoryId;
-                existingProduct.CostPrice = dto.CostPrice;
-                existingProduct.SellingPrice = dto.SellingPrice;
-                existingProduct.DiscountPrice = dto.DiscountPrice;
-                existingProduct.DiscountedPrice = dto.DiscountedPrice;
-                existingProduct.DiscountPercentage = dto.DiscountPercentage;
-                existingProduct.WholesalePrice = dto.WholesalePrice;
-                existingProduct.MinimumPrice = dto.MinimumPrice;
-                existingProduct.MaximumPrice = dto.MaximumPrice;
-                existingProduct.Description = dto.Description;
-                // Only when the caller actually sent it - see UpdateProductDto.
-                if (dto.IsActive.HasValue)
-                    existingProduct.IsActive = dto.IsActive.Value;
+                if (replaceOmittedFields)
+                {
+                    // Part 4.3 is documented as a full replace - a field the caller
+                    // left out is reset to its default. Parts 4.4 and 5.2 are the
+                    // documented paths for a partial update.
+                    existingProduct.ProductCode = dto.ProductCode;
+                    existingProduct.BarCode = dto.BarCode;
+                    existingProduct.ProductName = dto.ProductName;
+                    existingProduct.UnitOfMeasure = dto.UnitOfMeasure;
+                    existingProduct.Description = dto.Description;
+
+                    // Category is the one exception: resetting it would orphan the
+                    // product, and an omitted category is not validated above.
+                    existingProduct.CategoryId = dto.CategoryId ?? existingProduct.CategoryId;
+                    existingProduct.SubCategoryId = (dto.SubCategoryId ?? 0) == 0 ? null : dto.SubCategoryId;
+
+                    existingProduct.Quantity = dto.Quantity ?? 0;
+                    existingProduct.CostPrice = dto.CostPrice ?? 0;
+                    existingProduct.SellingPrice = dto.SellingPrice ?? 0;
+                    existingProduct.DiscountPrice = dto.DiscountPrice ?? 0;
+                    existingProduct.DiscountedPrice = dto.DiscountedPrice ?? 0;
+                    existingProduct.DiscountPercentage = dto.DiscountPercentage ?? 0;
+                    existingProduct.WholesalePrice = dto.WholesalePrice ?? 0;
+                    existingProduct.MinimumPrice = dto.MinimumPrice ?? 0;
+                    existingProduct.MaximumPrice = dto.MaximumPrice ?? 0;
+                }
+                else
+                {
+                    // Part 4.4: only the fields the caller actually sent. Its demo
+                    // payload omits barcode, quantity, cost and subcategory, so a
+                    // blind overwrite here silently destroyed stock and pricing.
+                    if (dto.ProductCode != null) existingProduct.ProductCode = dto.ProductCode;
+                    if (dto.BarCode != null) existingProduct.BarCode = dto.BarCode;
+                    if (dto.ProductName != null) existingProduct.ProductName = dto.ProductName;
+                    if (dto.UnitOfMeasure != null) existingProduct.UnitOfMeasure = dto.UnitOfMeasure;
+                    if (dto.Description != null) existingProduct.Description = dto.Description;
+
+                    if (dto.CategoryId.HasValue) existingProduct.CategoryId = dto.CategoryId.Value;
+                    if (dto.SubCategoryId.HasValue)
+                        existingProduct.SubCategoryId = dto.SubCategoryId == 0 ? null : dto.SubCategoryId;
+
+                    if (dto.Quantity.HasValue) existingProduct.Quantity = dto.Quantity.Value;
+                    if (dto.CostPrice.HasValue) existingProduct.CostPrice = dto.CostPrice.Value;
+                    if (dto.SellingPrice.HasValue) existingProduct.SellingPrice = dto.SellingPrice.Value;
+                    if (dto.DiscountPrice.HasValue) existingProduct.DiscountPrice = dto.DiscountPrice.Value;
+                    if (dto.DiscountedPrice.HasValue) existingProduct.DiscountedPrice = dto.DiscountedPrice.Value;
+                    if (dto.DiscountPercentage.HasValue) existingProduct.DiscountPercentage = dto.DiscountPercentage.Value;
+                    if (dto.WholesalePrice.HasValue) existingProduct.WholesalePrice = dto.WholesalePrice.Value;
+                    if (dto.MinimumPrice.HasValue) existingProduct.MinimumPrice = dto.MinimumPrice.Value;
+                    if (dto.MaximumPrice.HasValue) existingProduct.MaximumPrice = dto.MaximumPrice.Value;
+                }
+
+                // Null means "leave alone" in both modes - a caller that omitted
+                // this must never silently deactivate the product it was editing.
+                if (dto.IsActive.HasValue) existingProduct.IsActive = dto.IsActive.Value;
                 existingProduct.UpdatedDate = DateTime.Now;
                 existingProduct.UpdatedUser = dto.UpdatedUser;
 
@@ -313,7 +361,7 @@ namespace TERMS_LOYALTY_API.Repository
                         BarCode = productData.BarCode,
                         ProductName = productData.ProductName,
                         CategoryId = productData.CategoryId,
-                        SubCategoryId = productData.SubCategoryId ?? 0,
+                        SubCategoryId = productData.SubCategoryId,
                         Quantity = productData.Quantity,
                         UnitOfMeasure = productData.UnitOfMeasure,
                         CostPrice = productData.CostPrice,
@@ -330,7 +378,9 @@ namespace TERMS_LOYALTY_API.Repository
                         StoreId = productData.StoreId,
                     };
 
-                    product = await UpdateProductAsync(productId.Value, updateDto);
+                    // Part 4.4 merges: its documented demo payload omits fields that
+                    // must survive the call.
+                    product = await UpdateProductAsync(productId.Value, updateDto, replaceOmittedFields: false);
                 }
                 else
                 {
@@ -338,25 +388,30 @@ namespace TERMS_LOYALTY_API.Repository
                     if (exists)
                         throw new ArgumentException("Product with same code already exists.");
 
+                    if (!productData.CategoryId.HasValue)
+                        throw new ArgumentException("CategoryId is required when creating a product.");
+
+                    // Nothing to merge with on a create, so a null field simply
+                    // takes the default it would have had before it was nullable.
                     product = new ProductMaster
                     {
                         ProductCode = productData.ProductCode,
                         BarCode = productData.BarCode,
                         ProductName = productData.ProductName,
-                        CategoryId = productData.CategoryId,
+                        CategoryId = productData.CategoryId.Value,
                         SubCategoryId = productData.SubCategoryId == 0 ? null : productData.SubCategoryId,
-                        Quantity = productData.Quantity,
-                        UnitOfMeasure = productData.UnitOfMeasure,
-                        CostPrice = productData.CostPrice,
-                        SellingPrice = productData.SellingPrice,
-                        DiscountPrice = productData.DiscountPrice,
-                        DiscountedPrice = productData.DiscountedPrice,
-                        DiscountPercentage = productData.DiscountPercentage,
-                        WholesalePrice = productData.WholesalePrice,
-                        MinimumPrice = productData.MinimumPrice,
-                        MaximumPrice = productData.MaximumPrice,
+                        Quantity = productData.Quantity ?? 0,
+                        UnitOfMeasure = productData.UnitOfMeasure ?? string.Empty,
+                        CostPrice = productData.CostPrice ?? 0,
+                        SellingPrice = productData.SellingPrice ?? 0,
+                        DiscountPrice = productData.DiscountPrice ?? 0,
+                        DiscountedPrice = productData.DiscountedPrice ?? 0,
+                        DiscountPercentage = productData.DiscountPercentage ?? 0,
+                        WholesalePrice = productData.WholesalePrice ?? 0,
+                        MinimumPrice = productData.MinimumPrice ?? 0,
+                        MaximumPrice = productData.MaximumPrice ?? 0,
                         Description = productData.Description,
-                        IsActive = productData.IsActive,
+                        IsActive = productData.IsActive ?? true,
                         CreatedUser = userId,
                         StoreId = productData.StoreId,
                     };

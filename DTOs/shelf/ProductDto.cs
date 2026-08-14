@@ -28,26 +28,29 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
 
     public class UpdateProductDto
     {
+        // Every field below is nullable on purpose, for the same reason IsActive
+        // always was: a plain bool defaults to false and a plain decimal to 0, so
+        // any caller that omitted a field silently overwrote the stored value -
+        // blanking stock, cost and barcodes on what was meant to be a price edit.
+        // Null uniformly means "leave the current value alone".
         public string ProductCode { get; set; }
         public string BarCode { get; set; }
         public string ProductName { get; set; }
-        public long CategoryId { get; set; }
-        public long SubCategoryId { get; set; }
-        public decimal Quantity { get; set; }
-        public string UnitOfMeasure { get; set; } = string.Empty;
-        public decimal CostPrice { get; set; }
-        public decimal SellingPrice { get; set; }
-        public decimal DiscountPrice { get; set; }
-        public decimal DiscountedPrice { get; set; } = 0;
-        public decimal DiscountPercentage { get; set; }
-        public decimal WholesalePrice { get; set; }
-        public decimal MinimumPrice { get; set; }
-        public decimal MaximumPrice { get; set; }
-        public string Description { get; set; }
+        public long? CategoryId { get; set; }
 
-        // Nullable on purpose: a plain bool defaults to false, so any caller that
-        // omitted this field silently deactivated the product it was editing.
-        // Null now means "leave the current value alone".
+        /// <summary>Null keeps the current subcategory; 0 clears it.</summary>
+        public long? SubCategoryId { get; set; }
+        public decimal? Quantity { get; set; }
+        public string UnitOfMeasure { get; set; }
+        public decimal? CostPrice { get; set; }
+        public decimal? SellingPrice { get; set; }
+        public decimal? DiscountPrice { get; set; }
+        public decimal? DiscountedPrice { get; set; }
+        public decimal? DiscountPercentage { get; set; }
+        public decimal? WholesalePrice { get; set; }
+        public decimal? MinimumPrice { get; set; }
+        public decimal? MaximumPrice { get; set; }
+        public string Description { get; set; }
         public bool? IsActive { get; set; }
 
         public int? UpdatedUser { get; set; }

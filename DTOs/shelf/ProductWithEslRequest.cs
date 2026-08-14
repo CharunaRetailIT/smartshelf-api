@@ -14,25 +14,35 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
         public bool BindToEsl { get; set; } = true;
     }
 
+    /// <summary>
+    /// The product half of a with-ESL create or update. Everything except
+    /// StoreId is nullable on purpose: on an update null means "the caller did
+    /// not send this field, keep what is stored". A plain decimal arrives as 0
+    /// and is indistinguishable from a deliberate zero, which is how a partial
+    /// update used to blank stock and pricing. Same rule the bulk endpoints
+    /// already follow. On a create null just falls back to the usual default.
+    /// </summary>
     public class ProductEslData
     {
         public string ProductCode { get; set; }
         public string BarCode { get; set; }
         public string ProductName { get; set; }
-        public long CategoryId { get; set; }
+        public long? CategoryId { get; set; }
+
+        /// <summary>Null keeps the current subcategory; 0 clears it.</summary>
         public long? SubCategoryId { get; set; }
-        public decimal Quantity { get; set; }
-        public string UnitOfMeasure { get; set; } = string.Empty;
-        public decimal CostPrice { get; set; }
-        public decimal SellingPrice { get; set; }
-        public decimal DiscountPrice { get; set; }
-        public decimal DiscountedPrice { get; set; }
-        public decimal DiscountPercentage { get; set; }
-        public decimal WholesalePrice { get; set; }
-        public decimal MinimumPrice { get; set; }
-        public decimal MaximumPrice { get; set; }
+        public decimal? Quantity { get; set; }
+        public string UnitOfMeasure { get; set; }
+        public decimal? CostPrice { get; set; }
+        public decimal? SellingPrice { get; set; }
+        public decimal? DiscountPrice { get; set; }
+        public decimal? DiscountedPrice { get; set; }
+        public decimal? DiscountPercentage { get; set; }
+        public decimal? WholesalePrice { get; set; }
+        public decimal? MinimumPrice { get; set; }
+        public decimal? MaximumPrice { get; set; }
         public string Description { get; set; }
-        public bool IsActive { get; set; } = true;
+        public bool? IsActive { get; set; }
         public long StoreId { get; set; }
     }
 
