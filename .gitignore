@@ -64,3 +64,5 @@ nunit-*.xml
 
 # Test results
 test-results/
+# Draft PR descriptions, not part of the deliverable
+postman/PR_BODY.md
