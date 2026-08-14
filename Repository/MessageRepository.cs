@@ -35,12 +35,17 @@ namespace TERMS_LOYALTY_API.Repository
             _userContext = userContext;
         }
 
+        /// <summary>
+        /// Active messages only, which is what the API document promises and what
+        /// callers assume - a deactivated message is not something a client should
+        /// be offered. Use the paged endpoint if you need deactivated rows too.
+        /// </summary>
         public async Task<IEnumerable<MessageMaster>> GetMessagesAsync(long? storeId)
         {
-            if(storeId == null)
-            return await _context.MessageMaster.Include(x => x.ContentTypes).ToListAsync();
-            else
-                return await _context.MessageMaster.Where(x => x.StoreId  == storeId).Include(x => x.ContentTypes).ToListAsync();
+            return await _context.MessageMaster
+                .Where(x => x.IsActive && (storeId == null || x.StoreId == storeId))
+                .Include(x => x.ContentTypes)
+                .ToListAsync();
         }
 
         public async Task<IEnumerable<MessageWithUserDto>> GetMessagesWithUsersAsync(HttpRequest request, long? storeId)
@@ -306,18 +311,19 @@ namespace TERMS_LOYALTY_API.Repository
             return message;
         }
 
-        public async Task<MessageMaster> UpdateImageMessage(long id, IFormFile image, string title, int duration, bool isActive, int updatedBy,long? storeId, long? screenSizeId)
+        public async Task<MessageMaster> UpdateImageMessage(long id, IFormFile image, string title, int? duration, bool? isActive, int updatedBy,long? storeId, long? screenSizeId)
         {
             try
             {
                 var message = _context.MessageMaster.Where(x => x.Id == id && (storeId == null || x.StoreId == storeId)).FirstOrDefault()
                        ?? throw new KeyNotFoundException("Message not found");
 
-                // Always update NON-file fields
-                message.Title = title;
-                message.Duration = duration;
-                message.ScreenSizeId = screenSizeId;
-                message.IsActive = isActive;
+                // Only the NON-file fields the caller actually sent. Replacing the
+                // image must not blank the rest of the row.
+                if (title != null) message.Title = title;
+                if (duration.HasValue) message.Duration = duration.Value;
+                if (screenSizeId.HasValue) message.ScreenSizeId = screenSizeId.Value;
+                if (isActive.HasValue) message.IsActive = isActive.Value;
                 message.UpdatedUser = updatedBy;
                 message.UpdatedDate = DateTime.UtcNow;
 
@@ -410,11 +416,12 @@ namespace TERMS_LOYALTY_API.Repository
                     message.FileUrl = $"/uploads/images/{fileName}";
                 }
 
-                message.Title = dto.Title;
-                message.FabricJsData = dto.FabricJsData;
-                message.Duration = dto.Duration;
-                message.ScreenSizeId = dto.ScreenSizeId;
-                message.IsActive = dto.IsActive;
+                // Only what the caller actually sent - see UpdateCustomImageMessageDto.
+                if (dto.Title != null) message.Title = dto.Title;
+                if (dto.FabricJsData != null) message.FabricJsData = dto.FabricJsData;
+                if (dto.Duration.HasValue) message.Duration = dto.Duration.Value;
+                if (dto.ScreenSizeId.HasValue) message.ScreenSizeId = dto.ScreenSizeId.Value;
+                if (dto.IsActive.HasValue) message.IsActive = dto.IsActive.Value;
                 message.UpdatedUser = dto.UpdatedBy;
                 message.UpdatedDate = DateTime.UtcNow;
 

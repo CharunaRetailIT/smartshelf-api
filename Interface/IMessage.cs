@@ -19,7 +19,7 @@ namespace TERMS_LOYALTY_API.Interface
         Task<MessageMaster> CreateCustomImageMessageAsync(string title, string fabricJsData, string imageData, int duration, int createdBy, long? storeId, long? screenSizeId);
         Task<MessageMaster> UpdateMessageAsync(long id, MessageUpdateDto dto);
         Task<MessageMaster> UpdateGeneralMessage(UpdateGeneralMessageDto dto);
-        Task<MessageMaster> UpdateImageMessage(long id, IFormFile image, string title, int duration, bool isActive, int updatedBy, long? storeId, long? screenSizeId);
+        Task<MessageMaster> UpdateImageMessage(long id, IFormFile image, string title, int? duration, bool? isActive, int updatedBy, long? storeId, long? screenSizeId);
         Task<MessageMaster> UpdateVideoMessage(long id, IFormFile video, string title, int duration, bool isActive, int updatedBy, long? storeId, long? screenSizeId);
         Task<MessageMaster> UpdateCustomImageMessage(UpdateCustomImageMessageDto dto);
         Task<bool> DeleteMessageAsync(long id, int userId, long? storeId);
