@@ -11,8 +11,11 @@ stays in step with the code it describes.
 ## Getting started
 
 1. Import both files into Postman.
-2. Select the **SmartShelf ESL** environment and set `baseUrl`, `userName` and
-   `password`. `userName` is the **Employee ID**, not the email address.
+2. Select the **SmartShelf ESL** environment and set `userName` and `password`.
+   `userName` is the **Employee ID**, not the email address.
+
+   `baseUrl` is preset to `https://esl-api.retailit.lk`. Point it at
+   `http://localhost:5000` to run against a local build.
 3. Run **Auth → Login**. The token, store and user id are captured into the
    environment automatically; every other request picks them up.
 
