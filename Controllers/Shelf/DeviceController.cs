@@ -540,6 +540,9 @@ public class DeviceController : ControllerBase
                     id = d.Id,
                     mac = d.MACAddress,
                     deviceName = d.Name,
+                    // Callers need this to tell a Minew label from a Standard
+                    // one; it is required when registering a device.
+                    deviceType = d.DeviceType,
                     // ScreenId is optional, so this is a LEFT JOIN. Inch/Height/
                     // Width are non-nullable on DeviceScreen, and materialising a
                     // NULL into them threw "Nullable object must have a value"
@@ -557,11 +560,26 @@ public class DeviceController : ControllerBase
                 })
                 .ToListAsync();
 
-            return Ok(devices);
+            // Wrapped in the standard envelope like every other read in this API.
+            // It used to return a bare array, so a client following the document
+            // and reading `result` got nothing.
+            return Ok(new HttpResponseData<object>
+            {
+                Success = true,
+                Message = "Devices retrieved successfully.",
+                Result = devices,
+                ResponsCode = 200,
+            });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { message = ex.Message });
+            return StatusCode(500, new HttpResponseData<object>
+            {
+                Success = false,
+                Message = "Failed to retrieve devices.",
+                Error = ex.Message,
+                ResponsCode = 500,
+            });
         }
     }
 
@@ -2371,21 +2389,42 @@ public class DeviceController : ControllerBase
     /// 
     /// A template belongs to one Minew store and one screen size; using one from
     /// another store is rejected at bind time with 模板不存在.
+    ///
+    /// storeId is optional: omit it and every store's templates come back, as
+    /// before. Supply it and the list is scoped, matching template/{id}.
     /// </summary>
     [HttpGet("template/local")]
-    public async Task<IActionResult> GetLocalTemplate()
+    public async Task<IActionResult> GetLocalTemplate([FromQuery] long? storeId = null)
     {
         try
         {
-            var devices = await _context.MinewTemplates
-                .Where(d => d.IsActive)
-                .ToListAsync();
+            var query = _context.MinewTemplates
+                .Where(d => d.IsActive);
 
-            return Ok(devices);
+            // Applied only when supplied - the portal calls this without a store.
+            if (storeId.HasValue)
+                query = query.Where(d => d.StoreId == storeId.Value);
+
+            var templates = await query.ToListAsync();
+
+            // Standard envelope - see devices/local above.
+            return Ok(new HttpResponseData<object>
+            {
+                Success = true,
+                Message = "Templates retrieved successfully.",
+                Result = templates,
+                ResponsCode = 200,
+            });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { message = ex.Message });
+            return StatusCode(500, new HttpResponseData<object>
+            {
+                Success = false,
+                Message = "Failed to retrieve templates.",
+                Error = ex.Message,
+                ResponsCode = 500,
+            });
         }
     }
 
@@ -2457,22 +2496,24 @@ public class DeviceController : ControllerBase
     [ProducesResponseType(typeof(HttpResponseData<TemplateDto>), 200)]
     [ProducesResponseType(typeof(HttpResponseData<TemplateDto>), 404)]
     [ProducesResponseType(typeof(HttpResponseData<TemplateDto>), 500)]
-    public async Task<IActionResult> GetTemplateById(string id)
+    public async Task<IActionResult> GetTemplateById(string id, [FromQuery] long? storeId = null)
     {
         var response = new HttpResponseData<TemplateDto>();
         try
         {
-            var template = await _deviceRepo.GetTempalteByIdAsync(id);
+            var template = await _deviceRepo.GetTempalteByIdAsync(id, storeId);
             if (template == null)
             {
                 response.Success = false;
-                response.Message = $"Template with ID {id} not found.";
+                response.Message = storeId.HasValue
+                    ? $"Template with ID {id} not found in store {storeId.Value}."
+                    : $"Template with ID {id} not found.";
                 response.ResponsCode = 404;
                 return NotFound(response);
             }
 
             response.Success = true;
-            response.Message = "Device retrieved successfully.";
+            response.Message = "Template retrieved successfully.";
             response.Result = template;
             response.ResponsCode = 200;
             return Ok(response);
@@ -2676,23 +2717,63 @@ public class DeviceController : ControllerBase
             if (string.IsNullOrEmpty(request.TemplateId))
                 return BadRequest(new { message = "TemplateId is required" });
 
+            var template = await _context.MinewTemplates
+                .FirstOrDefaultAsync(t => t.Id == request.TemplateId && t.IsActive);
+
+            if (template == null)
+                return NotFound(new { message = $"Template {request.TemplateId} not found." });
+
+            // Scope the template to the store. Templates belong to one store in
+            // the Minew cloud, and previewing (or later binding) one that belongs
+            // elsewhere fails with "template does not exist" - better to say so
+            // here than to pass it through and let the cloud answer in Chinese.
+            if (!string.IsNullOrWhiteSpace(request.StoreId))
+            {
+                var cloudStoreId = await ResolveMinewStoreIdAsync(request.StoreId);
+                var localStore = await _context.StoreMaster
+                    .FirstOrDefaultAsync(x => x.MinewStoreId == cloudStoreId);
+
+                if (localStore != null && template.StoreId != localStore.Id)
+                {
+                    return BadRequest(new
+                    {
+                        message =
+                            $"Template {request.TemplateId} belongs to another store and " +
+                            "cannot be previewed or bound here.",
+                    });
+                }
+            }
+
+            // Minew's preview endpoints key on demoName - the template NAME, not
+            // its id ("Query the template preview image using the template name").
+            // Passing the id returned an empty preview every time.
+            var demoName = string.IsNullOrWhiteSpace(template.Name)
+                ? request.TemplateId
+                : template.Name;
+
             var provider = _eslProviderFactory.GetProvider("Minew");
             string previewData;
 
             if (request.isBound && !string.IsNullOrEmpty(request.Mac) && !string.IsNullOrEmpty(request.StoreId))
             {
-                previewData = await provider.GetBoundTemplatePreviewAsync(request.TemplateId, request.Mac, request.StoreId);
+                // Minew addresses stores by its own id. Accept either form here and
+                // resolve, so a caller passing the SmartShelf store id - which is
+                // what the rest of this API takes - does not silently fail.
+                var previewStoreId = await ResolveMinewStoreIdAsync(request.StoreId) ?? request.StoreId;
+                previewData = await provider.GetBoundTemplatePreviewAsync(demoName, request.Mac, previewStoreId);
             }
             else
             {
-                previewData = await provider.GetUnboundTemplatePreviewAsync(request.TemplateId);
+                previewData = await provider.GetUnboundTemplatePreviewAsync(demoName);
             }
 
-            // Update template with preview image
-            var template = await _context.MinewTemplates
-                .FirstOrDefaultAsync(t => t.Id == request.TemplateId);
-
-            if (template != null)
+            // Cache the preview only when it fits. PreviewImage is nvarchar(500)
+            // and a rendered preview is a base64 image tens of kilobytes long, so
+            // assigning it unconditionally made SaveChanges throw and turned a
+            // working preview into a 500. The image is returned either way;
+            // widening the column would be needed to persist it.
+            const int previewColumnLimit = 500;
+            if (!string.IsNullOrEmpty(previewData) && previewData.Length <= previewColumnLimit)
             {
                 template.PreviewImage = previewData;
                 await _context.SaveChangesAsync();
@@ -2871,7 +2952,8 @@ public class DeviceController : ControllerBase
             {
                 Result = result,
                 Success = true,
-                Message = "Device template combos retrieved successfully"
+                Message = "Device template combos retrieved successfully",
+                ResponsCode = 200
             });
         }
         catch (Exception ex)
@@ -2909,11 +2991,25 @@ public class DeviceController : ControllerBase
 
             var result = await _deviceRepo.GetComboByIdAsync(id);
 
+            // The repository answers null for an unknown id rather than throwing.
+            // Returning 200 with a null result made a missing combo indistinguishable
+            // from a found one for any caller reading the status code.
+            if (result == null)
+            {
+                return NotFound(new HttpResponseData<object>
+                {
+                    Success = false,
+                    Message = $"DeviceTemplateCombo with ID {id} not found.",
+                    ResponsCode = 404
+                });
+            }
+
             return Ok(new HttpResponseData<DeviceTemplateComboDto>
             {
                 Result = result,
                 Success = true,
-                Message = "DeviceTemplateCombo updated successfully"
+                Message = "DeviceTemplateCombo retrieved successfully.",
+                ResponsCode = 200
             });
         }
         catch (KeyNotFoundException ex)
@@ -2921,7 +3017,8 @@ public class DeviceController : ControllerBase
             return NotFound(new HttpResponseData<object>
             {
                 Success = false,
-                Message = ex.Message
+                Message = ex.Message,
+                ResponsCode = 404
             });
         }
         catch (InvalidOperationException ex)
@@ -2929,17 +3026,19 @@ public class DeviceController : ControllerBase
             return Conflict(new HttpResponseData<object>
             {
                 Success = false,
-                Message = ex.Message
+                Message = ex.Message,
+                ResponsCode = 409
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating DeviceTemplateCombo with ID: {Id}", id);
+            _logger.LogError(ex, "Error retrieving DeviceTemplateCombo with ID: {Id}", id);
             return StatusCode(500, new HttpResponseData<object>
             {
                 Success = false,
-                Message = "An error occurred while updating DeviceTemplateCombo",
-                Error = ex.Message
+                Message = "An error occurred while retrieving DeviceTemplateCombo",
+                Error = ex.Message,
+                ResponsCode = 500
             });
         }
     }
@@ -2964,7 +3063,8 @@ public class DeviceController : ControllerBase
                 {
                     Success = false,
                     Message = "Invalid request data",
-                    Error = ModelState.Values.ToString()
+                    Error = ModelState.Values.ToString(),
+                    ResponsCode = 400
                 });
             }
 
@@ -2974,7 +3074,8 @@ public class DeviceController : ControllerBase
             {
                 Result = result,
                 Success = true,
-                Message = "DeviceTemplateCombo updated successfully"
+                Message = "DeviceTemplateCombo updated successfully",
+                ResponsCode = 200
             });
         }
         catch (KeyNotFoundException ex)
@@ -2982,7 +3083,8 @@ public class DeviceController : ControllerBase
             return NotFound(new HttpResponseData<object>
             {
                 Success = false,
-                Message = ex.Message
+                Message = ex.Message,
+                ResponsCode = 404
             });
         }
         catch (InvalidOperationException ex)
@@ -2990,7 +3092,8 @@ public class DeviceController : ControllerBase
             return Conflict(new HttpResponseData<object>
             {
                 Success = false,
-                Message = ex.Message
+                Message = ex.Message,
+                ResponsCode = 409
             });
         }
         catch (Exception ex)
@@ -3000,71 +3103,15 @@ public class DeviceController : ControllerBase
             {
                 Success = false,
                 Message = "An error occurred while updating DeviceTemplateCombo",
-                Error = ex.Message
+                Error = ex.Message,
+                ResponsCode = 500
             });
         }
     }
 
-    /// <summary>
-    /// Update an existing DeviceTemplateCombo
-    /// </summary>
-    [Authorize(Roles = "Admin,Manager")]
-    [HttpPost("combos/{id}")]
-    [ProducesResponseType(typeof(HttpResponseData<DeviceTemplateCombos>), 200)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 409)]
-    [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
-    public async Task<IActionResult> Update(long id, [FromBody] UpdateDeviceTemplateComboDto dto)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(new HttpResponseData<object>
-                {
-                    Success = false,
-                    Message = "Invalid request data",
-                    Error = ModelState.Values.ToString()
-                });
-            }
-
-            var result = await _deviceRepo.UpdateDeviceTemplateCombosAsync(id, dto);
-
-            return Ok(new HttpResponseData<DeviceTemplateCombos>
-            {
-                Result = result,
-                Success = true,
-                Message = "DeviceTemplateCombo updated successfully"
-            });
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new HttpResponseData<object>
-            {
-                Success = false,
-                Message = ex.Message
-            });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new HttpResponseData<object>
-            {
-                Success = false,
-                Message = ex.Message
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating DeviceTemplateCombo with ID: {Id}", id);
-            return StatusCode(500, new HttpResponseData<object>
-            {
-                Success = false,
-                Message = "An error occurred while updating DeviceTemplateCombo",
-                Error = ex.Message
-            });
-        }
-    }
+    // POST combos/{id} was a byte-for-byte duplicate of the PUT above - same DTO,
+    // same repository call - and nothing called it. Removed so the update path has
+    // one route, and one place to keep correct.
 
     /// <summary>
     /// Deletes a device+template pairing. Rejected while an active assignment uses it.
@@ -3082,12 +3129,16 @@ public class DeviceController : ControllerBase
 
             if (!success)
             {
-                // Cannot delete due to active combos
-                return Ok(new HttpResponseData<bool>
+                // Still used by an active assignment. This was returned as 200 with
+                // success:false, so a caller reading only the status code recorded a
+                // refusal as a successful delete. It is a state conflict - 409, in
+                // line with the queue endpoints.
+                return Conflict(new HttpResponseData<bool>
                 {
                     Success = false,
                     Message = message,
-                    Result = false
+                    Result = false,
+                    ResponsCode = 409
                 });
             }
 
@@ -3095,7 +3146,8 @@ public class DeviceController : ControllerBase
             {
                 Success = true,
                 Message = message,
-                Result = true
+                Result = true,
+                ResponsCode = 200
             });
         }
         catch (KeyNotFoundException ex)
@@ -3104,7 +3156,8 @@ public class DeviceController : ControllerBase
             return NotFound(new HttpResponseData<object>
             {
                 Success = false,
-                Message = ex.Message
+                Message = ex.Message,
+                ResponsCode = 404
             });
         }
         catch (Exception ex)
@@ -3114,7 +3167,8 @@ public class DeviceController : ControllerBase
             {
                 Success = false,
                 Message = "An error occurred while deleting the combo",
-                Error = ex.Message
+                Error = ex.Message,
+                ResponsCode = 500
             });
         }
     }

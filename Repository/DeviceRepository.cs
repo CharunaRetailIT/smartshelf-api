@@ -1370,12 +1370,19 @@ namespace TERMS_LOYALTY_API.Repository
             return (combo, false);
         }
 
-        public async Task<TemplateDto> GetTempalteByIdAsync(string templateId)
+        public async Task<TemplateDto> GetTempalteByIdAsync(string templateId, long? storeId = null)
         {
-            var template = await _context.MinewTemplates
+            var query = _context.MinewTemplates
                                .Include(d => d.Store)
-                               .Where(t => t.IsActive && t.Id == templateId.Trim())
-                               .FirstOrDefaultAsync();
+                               .Where(t => t.IsActive && t.Id == templateId.Trim());
+
+            // Templates belong to a store in the Minew cloud, and binding one
+            // that belongs elsewhere fails with "template does not exist". Scope
+            // the lookup so a caller cannot pick up another store's template.
+            if (storeId.HasValue)
+                query = query.Where(t => t.StoreId == storeId.Value);
+
+            var template = await query.FirstOrDefaultAsync();
             if (template == null)
                 return null;
 

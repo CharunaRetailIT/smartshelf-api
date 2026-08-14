@@ -28,7 +28,7 @@ namespace TERMS_LOYALTY_API.Interface
 
         //Device Template
         Task<PagedResult<TemplateDto>> GetTemplatesPagedAsync(TemplatePagedRequest request);
-        Task<TemplateDto> GetTempalteByIdAsync(string templateId);
+        Task<TemplateDto> GetTempalteByIdAsync(string templateId, long? storeId = null);
         Task<List<TemplateDto>> GetTemplatesAsync(); // For backward compatibility
         Task<(bool success, string message)> DeleteTemplateAsync(string id, int userId);
         Task<List<TemplateDto>> GetTemplatesByIdsAsync(List<string> ids);
