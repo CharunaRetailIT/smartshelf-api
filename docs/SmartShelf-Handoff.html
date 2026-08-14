@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SmartShelf ESL — Engineering Handoff</title>
+<style>
+:root{
+  --paper:#FBFAF7; --card:#FFFFFF; --ink:#17181C; --ink-2:#4A4C55; --ink-3:#7C7E88;
+  --rule:#E4E1D9; --rule-2:#EFEDE6;
+  --red:#C0261F; --red-bg:#FBEEEC; --amber:#B57A00; --amber-bg:#FBF4E2;
+  --done:#2E6B4F; --done-bg:#EBF3EE;
+  --code-bg:#F4F2EC;
+}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+  --paper:#131418; --card:#1A1B20; --ink:#EDECE7; --ink-2:#B2B3BB; --ink-3:#83858F;
+  --rule:#2C2D34; --rule-2:#24252B;
+  --red:#F0736A; --red-bg:#2A1A18; --amber:#E0A93A; --amber-bg:#2A2317;
+  --done:#6DC095; --done-bg:#16241D;
+  --code-bg:#212228;
+}}
+:root[data-theme="dark"]{
+  --paper:#131418; --card:#1A1B20; --ink:#EDECE7; --ink-2:#B2B3BB; --ink-3:#83858F;
+  --rule:#2C2D34; --rule-2:#24252B;
+  --red:#F0736A; --red-bg:#2A1A18; --amber:#E0A93A; --amber-bg:#2A2317;
+  --done:#6DC095; --done-bg:#16241D;
+  --code-bg:#212228;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+  font-size:15.5px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:60rem;margin:0 auto;padding:3rem 1.5rem 6rem;display:flex;flex-direction:column;gap:3rem}
+code,kbd,.mono{font-family:"Cascadia Mono",Consolas,ui-monospace,monospace}
+code{background:var(--code-bg);padding:.1em .38em;border-radius:3px;font-size:.87em}
+h1,h2,h3{text-wrap:balance;margin:0;line-height:1.25}
+h1{font-size:2.1rem;font-weight:650;letter-spacing:-.02em}
+h2{font-size:1.3rem;font-weight:640;letter-spacing:-.01em}
+h3{font-size:1.02rem;font-weight:640}
+p{margin:0}
+a{color:var(--ink);text-decoration-color:var(--ink-3);text-underline-offset:2px}
+.eyebrow{font-size:.72rem;font-weight:640;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);font-family:"Cascadia Mono",Consolas,monospace}
+
+/* header */
+header{display:flex;flex-direction:column;gap:.9rem;border-bottom:2px solid var(--ink);padding-bottom:1.6rem}
+.sub{color:var(--ink-2);max-width:62ch}
+.meta{display:flex;flex-wrap:wrap;gap:.4rem 1.6rem;font-size:.82rem;color:var(--ink-3);font-family:"Cascadia Mono",Consolas,monospace}
+
+section{display:flex;flex-direction:column;gap:1.1rem}
+.sechead{display:flex;flex-direction:column;gap:.3rem;border-bottom:1px solid var(--rule);padding-bottom:.6rem}
+.lede{color:var(--ink-2);max-width:68ch}
+
+/* state rail cards */
+.items{display:flex;flex-direction:column;gap:.7rem}
+.item{background:var(--card);border:1px solid var(--rule);border-left:4px solid var(--ink-3);border-radius:2px;padding:.85rem 1.1rem;display:flex;flex-direction:column;gap:.35rem}
+.item.done{border-left-color:var(--done)}
+.item.open{border-left-color:var(--amber)}
+.item.block{border-left-color:var(--red)}
+.item h3{display:flex;flex-wrap:wrap;align-items:baseline;gap:.6rem}
+.item p{color:var(--ink-2);font-size:.93rem}
+.chip{font-family:"Cascadia Mono",Consolas,monospace;font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;font-weight:700;padding:.16em .5em;border-radius:2px;white-space:nowrap}
+.chip.done{background:var(--done-bg);color:var(--done)}
+.chip.open{background:var(--amber-bg);color:var(--amber)}
+.chip.block{background:var(--red-bg);color:var(--red)}
+
+/* key/value grid */
+.kv{display:grid;grid-template-columns:auto 1fr;gap:.45rem 1.4rem;font-size:.9rem;align-items:baseline}
+.kv dt{font-family:"Cascadia Mono",Consolas,monospace;font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
+.kv dd{margin:0;font-family:"Cascadia Mono",Consolas,monospace;font-size:.86rem;word-break:break-all}
+
+pre{margin:0;background:var(--code-bg);border:1px solid var(--rule-2);border-radius:3px;padding:.85rem 1rem;overflow-x:auto;font-size:.83rem;line-height:1.55;font-family:"Cascadia Mono",Consolas,monospace}
+pre .c{color:var(--ink-3)}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:2px}
+table{border-collapse:collapse;width:100%;font-size:.88rem;background:var(--card)}
+th,td{text-align:left;padding:.55rem .85rem;border-bottom:1px solid var(--rule-2);vertical-align:top}
+th{font-family:"Cascadia Mono",Consolas,monospace;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:600;background:var(--code-bg)}
+tr:last-child td{border-bottom:none}
+td.m{font-family:"Cascadia Mono",Consolas,monospace;font-size:.85rem;white-space:nowrap}
+
+ul{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.4rem}
+li{color:var(--ink-2)}
+li strong{color:var(--ink);font-weight:620}
+
+.callout{background:var(--red-bg);border:1px solid var(--red);border-radius:2px;padding:.9rem 1.1rem;display:flex;flex-direction:column;gap:.4rem}
+.callout .eyebrow{color:var(--red)}
+.callout p{color:var(--ink);font-size:.93rem}
+
+footer{border-top:1px solid var(--rule);padding-top:1.2rem;color:var(--ink-3);font-size:.84rem}
+
+@page{size:A4;margin:14mm 12mm}
+@media print{:root{color-scheme:light}body{background:#fff}
+.wrap{max-width:none;padding:0;gap:2rem}
+.item,.callout,.tablewrap,pre,.kv{break-inside:avoid}
+h2,.sechead{break-after:avoid}
+pre{white-space:pre-wrap;word-break:break-word}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Engineering handoff · continue from here</div>
+  <h1>SmartShelf ESL — session handoff</h1>
+  <p class="sub">Angular 19 portal + .NET 5 API driving Minew electronic shelf labels. This is everything an incoming agent needs to pick the work up: current state, what was raised but not actioned, what is still broken, and the traps that cost real time in this codebase. Nothing is mid-flight this time — the blocker is a build the owner has to run.</p>
+  <div class="meta">
+    <span>14 Aug 2026 · revised end of session 2</span><span>web: smartshelf-web @ main</span><span>api: smartshelf-api</span><span>Minew Open API V5.0.22</span>
+  </div>
+</header>
+
+<section>
+  <div class="sechead"><div class="eyebrow">01 — Environment</div><h2>Where everything lives</h2></div>
+  <dl class="kv">
+    <dt>Web</dt><dd>D:\Projects\Hayleys\smartshelf-web — Angular 19, PrimeNG 19, Angular Material dialogs</dd>
+    <dt>API</dt><dd>D:\Projects\Hayleys\smartshelf-api — ASP.NET Core 5, EF Core, SQL Server</dd>
+    <dt>Docs</dt><dd>smartshelf-api\docs — spec.py → build.py → topdf.js → merged PDF</dd>
+    <dt>Local API</dt><dd>IIS Express https://localhost:7443 · scratch builds ran on 7447</dd>
+    <dt>Old API</dt><dd>D:\Projects\SmartShelf-Revamp\smartshelf-api — reference only, a known-good image bind lives here</dd>
+    <dt>Test labels</dt><dd>c300002e8c2a · e0000000be65 — the only two physical labels available</dd>
+    <dt>Login</dt><dd>user charu — password held by the repo owner, not recorded here</dd>
+  </dl>
+  <p class="lede">Testing rule the owner set and it matters: <strong>always curl the locally running project and the local database</strong>, never the base URL printed in the API document.</p>
+</section>
+
+<section>
+  <div class="sechead"><div class="eyebrow">02 — Start here</div><h2>Nothing is mid-flight</h2></div>
+  <div class="callout">
+    <div class="eyebrow">State at the end of this session</div>
+    <p>No instruction was left running. The last request — “remove that duplicate post combos route” — was completed and verified. Both items that were open in the previous handoff are now fixed.</p>
+  </div>
+  <p class="lede">The one thing genuinely waiting is not a code task: <strong>the API has never been compiled by the owner since any of this work began.</strong> Everything below exists in source and in scratch builds only. Section 04 covers it.</p>
+  <p class="lede">If work is wanted, these were raised during the session and deliberately not actioned. Ask before starting any of them:</p>
+  <ul>
+    <li><strong><code>GET /api/device/combos</code> is unscoped</strong> — no store filter and no <code>IsActive</code> filter, so it returns every store's pairings including retired ones. The paged sibling filters both. This is the same gap that 3.4 had. It is no longer in the client document, so fixing it affects only the portal.</li>
+    <li><strong>The label lookup cannot reach a redraw.</strong> <code>bindings[]</code> in Parts 6.1/6.2 carries <code>assignmentId</code> but not <code>deviceTemplateComboId</code>, so a caller holding only a MAC must detour through the product to get the <code>comboId</code> that Part 6.3 needs. Adding the field to the binding projection would close it.</li>
+    <li><strong>Six assignment endpoints remain undocumented</strong> — <code>POST/GET/DELETE api/device/assignments…</code>. The owner scoped this session to combinations only.</li>
+    <li><strong><code>GET api/device/assignments/{locationType}/{locationId}</code> reports <code>combo.id</code> as <code>0</code></strong> while the outer <code>deviceTemplateComboId</code> is correct. A client reading the nested id gets nothing.</li>
+    <li><strong>Part 4.6 still reports <code>messageAssignmentId</code> and <code>deviceMessageComboId</code></strong>, but the device-message endpoints were removed by design, so there is no documented way to act on them.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="sechead"><div class="eyebrow">03 — Shipped</div><h2>Completed</h2></div>
+  <p class="lede">The first six are this session. Everything below them came from the session before it and is unchanged.</p>
+  <div class="items">
+    <div class="item done"><h3>3.4 scoped to store <span class="chip done">done</span></h3><p>The interrupted task from the last handoff. <code>GetLocalTemplate()</code> takes an optional <code>[FromQuery] long? storeId</code>, applied only when supplied, mirroring 3.5. Verified against the local DB: no parameter returns all 9 templates across stores 2 and 3, <code>storeId=3</code> returns 2, <code>storeId=2</code> returns 7, an unknown store returns an empty 200, a non-numeric one 400. Doc entry 3.4 gained the parameter row and a note. <strong>The paged and v2 siblings already filtered</strong> — that open question is answered, they needed no change.</p></div>
+    <div class="item done"><h3><code>deactivate</code> now answers 409 <span class="chip done">done</span></h3><p>The other open item. <code>DeactivateQueueAsync</code> threw a bare <code>InvalidOperationException</code>, which the controller's catch-all turned into a 500 and logged as an error. Added <code>QueueNotActivatedException</code> alongside the three that already existed, mapped it to <code>Conflict</code>, and dropped guard rejections to <code>Information</code>. Queue 14 (Pending) now answers 409 naming its real status; the row is untouched. Doc 7.10 gained the code, plus Appendix B and C rows.</p></div>
+    <div class="item done"><h3>Combination endpoints documented — 6.6 to 6.10 <span class="chip done">done</span></h3><p>The client had no way to discover an existing pairing. Five endpoints appended to <strong>Part 6</strong> rather than made into a new Part, so nothing renumbered: pair, list (paged), query one, modify, delete. Every status code and sample payload came from a live curl, not from the code. Part 6.3 and a new Appendix C row now say how to get a <code>comboId</code> without knowing the product. The plain <code>GET /api/device/combos</code> was left out at the owner's instruction — only the paged list is published.</p></div>
+    <div class="item done"><h3>Three combination defects fixed <span class="chip done">done</span></h3><p>Found while documenting. <code>GET combos/{id}</code> answered <code>200</code> with <code>result: null</code> for an unknown id and said “updated successfully” on a read — now <code>404</code> with a correct message. <code>responsCode</code> read <code>0</code> across the combo endpoints — now set on every branch. <code>DELETE</code> refused an in-use pairing with <code>200 success:false</code>, so a caller reading the status recorded a refusal as a delete — now <code>409</code>.</p></div>
+    <div class="item done"><h3>Duplicate combo route removed <span class="chip done">done</span></h3><p><code>POST combos/{id}</code> was byte-for-byte identical to the <code>PUT</code> — same DTO, same repository call — and nothing in either repo called it. Removed; the route now answers 405 and the other five combo routes are unaffected.</p></div>
+    <div class="item done"><h3>Portal keeps the refusal message <span class="chip done">done</span></h3><p>Consequence of the 409 above. <code>deleteCombo</code> in <code>device.service.ts</code> had a <code>catchError</code> that replaced every failure with “Failed to delete combo”, so the new status would have hidden the reason. It now reads <code>error.error.message</code> with that text as fallback. <code>shelf-modal</code>'s use of <code>getDeviceTemplateComboById</code> was checked too — it is inside a try/catch, so the new 404 is handled.</p></div>
+    <div class="item done"><h3>Roles and route guards <span class="chip done">done</span></h3><p>Fixed the <code>role</code>/<code>roles</code> key typo and rewrote <code>role.guard.ts</code> to normalise to an array and use <code>hasAnyRole</code> — the old hierarchy branch passed every array unconditionally. User management locked to Admin; delete/restore made Admin-only across the API controllers.</p></div>
+    <div class="item done"><h3>Dialog system unified <span class="chip done">done</span></h3><p>All dialogs moved to Angular Material shells with PrimeNG fields inside. Fixed all-red buttons, footer white space, dropdown clipping and z-index under the CDK overlay, and control heights. Note the encapsulation trap in section 05.</p></div>
+    <div class="item done"><h3>Queue create + list <span class="chip done">done</span></h3><p>Tab strip for existing vs direct creation, delete repaired, view button removed, post-create now returns to the queue list instead of flashing white and bouncing to the dashboard. Status / device / locationType / date filters actually applied in <code>GetQueuesPagedAsync</code>.</p></div>
+    <div class="item done"><h3>ESL labels finally update <span class="chip done">done</span></h3><p>The headline bug. Chain was: case-sensitive <code>LocationType</code> compare → placeholder goodsMap → Minew <code>数据不存在</code>, all masked because the response code was never checked. Now trimmed and upper-cased, a missing binding throws with a real message, and <code>MinewBindSucceeded</code> inspects the raw JSON. Verified end to end: queue #10 returned <code>code 200 成功</code>.</p></div>
+    <div class="item done"><h3>Device management <span class="chip done">done</span></h3><p>Device type forced to Minew and hidden (create and edit), MAC validation dropped, message-combo tab hidden, local→cloud sync wired, screen width/height backfilled from the sync response, and a <strong>Refresh Screens</strong> action added. Round trip verified: delete → re-add → push → screens resolved.</p></div>
+    <div class="item done"><h3>Template preview repaired <span class="chip done">done</span></h3><p>Preview always returned <code>data: null</code> because we sent the template <em>id</em> as <code>demoName</code>; Minew wants the template <em>name</em>. Fixed, and an unbound preview now returns a real base64 BMP (~480k chars). A follow-on 500 came from caching that into <code>PreviewImage</code>, an <code>nvarchar(500)</code> column — the write is now attempted only when it fits.</p></div>
+    <div class="item done"><h3>API document — 44 endpoints, 81 pages <span class="chip done">done</span></h3><p>Added the Message API (Part 8, creation limited to image and custom image), device create + push to Minew, template 3.5/3.6, and fixed the 3.3/3.4 response shapes to the real envelope. Cover contact changed to retailit.lk / support@retailit.lk. Structure was left exactly as it was, per instruction.</p></div>
+    <div class="item done"><h3>Full endpoint audit <span class="chip done">done</span></h3><p>All 40 endpoints exercised with curl against the local API and database, using the two physical labels. Four findings; two remain open below.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><div class="eyebrow">04 — Open</div><h2>Known issues not yet fixed</h2></div>
+  <div class="items">
+    <div class="item block"><h3>Nothing is compiled <span class="chip block">blocking</span></h3><p>Every API change since the owner's last build exists only in scratch output, and there is now considerably more of it: store scoping, the queue 409, three combination fixes and a removed route. <strong>They must rebuild in Visual Studio and republish</strong> before any of it is live on 7443 or in production. 7443 was not listening at any point during this session. Do not report API work as deployed.</p></div>
+    <div class="item open"><h3><code>PreviewImage</code> column is too small <span class="chip open">by design, for now</span></h3><p>Caching a preview needs <code>nvarchar(max)</code>. Deliberately not changed — a schema migration was out of scope. The endpoint returns the image regardless; only the cache is skipped. Confirmed still <code>nvarchar(500)</code> in the database at the end of this session.</p></div>
+    <div class="item open"><h3>Five items raised and not actioned <span class="chip open">awaiting the owner</span></h3><p>Listed in section 02: the unscoped <code>combos</code> list, the missing <code>deviceTemplateComboId</code> on the label lookup, six undocumented assignment endpoints, <code>combo.id</code> reporting <code>0</code>, and the orphaned message-assignment fields in Part 4.6. Each was surfaced rather than fixed, per the working style in section 08.</p></div>
+    <div class="item open"><h3>The previous session's “shipped” list is unverified <span class="chip open">note</span></h3><p>Only <code>role.guard.ts</code> was spot-checked this session, and it holds. The other six items in section 03's lower half rest on that session's own testing — and this document's own trap list records that failures there were once reported as successes. Re-run the endpoint audit if any of it matters.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><div class="eyebrow">05 — Traps</div><h2>Things that cost hours here</h2></div>
+  <p class="lede">These are the errors actually made in this session. Each one looked like success at first, which is what made them expensive.</p>
+  <div class="items">
+    <div class="item block"><h3>CRLF makes scripted edits silently no-op <span class="chip block">verify output</span></h3><p>A Python search for <code>"…{\n  --brand-teal:"</code> matched nothing in a CRLF file, the replacement never applied, and it was reported as done. The owner saw an unchanged page. <strong>Use the Edit tool on these files, and confirm the compiled bundle before claiming a UI change landed.</strong></p></div>
+    <div class="item block"><h3>A stale process will hide your fix <span class="chip block">kill by port</span></h3><p><code>pkill</code> does not match <code>dotnet.exe</code> on Windows. An old build held the port and kept serving old behaviour while a "fix" appeared not to work. Kill the port owner instead:</p>
+<pre>(Get-NetTCPConnection -LocalPort 7447 -State Listen).OwningProcess</pre></div>
+    <div class="item block"><h3>Do not guess at the Minew contract <span class="chip block">read the PDF</span></h3><p>Two wrong guesses in one session: that a barcode was required (the doc says <code>false</code>), and that the image data URI prefix needed stripping — a diff against the working older API showed identical code, and all speculative changes were reverted. When a bind misbehaves, <strong>diff against <code>SmartShelf-Revamp</code> and read Cloud Platform API V5.0.22 before changing anything.</strong></p></div>
+    <div class="item block"><h3>Test writes hit real data <span class="chip block">careful</span></h3><p>A test <code>PUT</code> that omitted <code>isActive</code> deactivated the owner's live product. It was restored, and <code>UpdateProductDto.IsActive</code> is now nullable and applied only when present. Treat the local database as production data — it is the owner's working store.</p>
+      <p>The procedure that worked this session: snapshot the table first, prefer guard paths that throw before writing, and where a write is unavoidable use values that change nothing functional, then restore the audit columns and diff against the snapshot. Two writes were needed to document the combination endpoints — a no-op <code>PUT</code> and a throwaway pairing created solely to exercise a successful delete — and both were reverted, leaving <code>DeviceTemplateCombos</code> byte-identical to where it started. <strong>Say in the summary exactly which writes were made and that they were reverted.</strong></p></div>
+    <div class="item block"><h3>Do not trust a physical label is idle <span class="chip block">check the clock</span></h3><p><code>QueueProcessorService</code> starts with any build and, ten seconds later, activates every Pending queue whose window is open — pushing to a real label and mutating the owner's data. Queue 14 was Pending with a start time already passed in local terms, and was safe only because <code>StartDate</code> is compared in <strong>UTC</strong> and it was still hours away. Check <code>StartDate</code> against <code>date -u</code> before starting a scratch build, not against local time.</p></div>
+    <div class="item open"><h3><code>:host ::ng-deep</code> fails in overlays <span class="chip open">know this</span></h3><p>Dialog content renders in the CDK overlay, outside the host element, so host-scoped deep selectors never match. The pattern that works here is <code>.dlg-shell ::ng-deep</code>, with tokens declared on <code>:host, .dlg-shell</code>.</p></div>
+    <div class="item open"><h3>Minew and EF gotchas <span class="chip open">reference</span></h3><p>Minew signals failure with a <code>code</code> field while still returning HTTP 200 — always inspect it; errors arrive in Chinese (<code>数据不存在</code> no data, <code>模板不存在</code> template missing, <code>54015</code> gateway offline, <code>成功</code> success). EF <code>Include</code> on a required navigation emits an INNER JOIN and silently drops rows. SQL Server collation is case-insensitive but C# <code>==</code> is not. PrimeNG 19 renamed <code>.p-button</code>/<code>.p-highlight</code> to <code>.p-togglebutton</code>/<code>.p-togglebutton-checked</code>.</p></div>
+    <div class="item open"><h3><code>curl</code> is an alias for Invoke-WebRequest <span class="chip open">shell</span></h3><p>In PowerShell, <code>curl -H</code> fails with a Headers binding error. Use the Bash tool for curl, or <code>curl.exe</code> explicitly.</p></div>
+    <div class="item open"><h3>A bodyless POST answers 411, not 404 <span class="chip open">shell</span></h3><p><code>curl -X POST</code> with no body sends no <code>Content-Length</code>, and Kestrel rejects it with <strong>411 Length Required</strong> before routing. Three endpoints looked broken for a minute because of it. Send <code>-H "Content-Length: 0"</code>. The same run also proved the route was wrong — the queue controller is <code>api/queue</code>, singular, not <code>api/queues</code>. Read the <code>[Route]</code> attribute rather than guessing the plural.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><div class="eyebrow">06 — Runbook</div><h2>Rebuilding the API document</h2></div>
+  <p class="lede">Content lives only in <code>docs/spec.py</code>; the rest is pipeline. Run from <code>smartshelf-api/docs</code>.</p>
+<pre>python build.py                                  <span class="c"># spec.py → cover.html + body.html</span>
+CHROME_PATH="/c/Program Files/Google/Chrome/Application/chrome.exe" node topdf.js
+python -c "from pypdf import PdfWriter; w=PdfWriter(); [w.append(f) for f in ('cover.pdf','body.pdf')]; w.write(open('SmartShelf-ESL-Open-API-V1.0.0.pdf','wb'))"
+rm -f cover.pdf body.pdf cover.html body.html</pre>
+  <p class="lede">Validate before building — a syntax error in <code>spec.py</code> is the usual failure, most recently from escaped braces inside an HTML note string:</p>
+<pre>python -c "import ast,io; ast.parse(io.open('spec.py',encoding='utf-8').read())"</pre>
+  <p class="lede">Current output: <strong>8 parts, 49 endpoints, 3 appendices, 89 pages.</strong></p>
+  <p class="lede">Section and part numbers derive from list position, so appending an endpoint renumbers everything after it. <strong>Grep <code>spec.py</code> for the old numbers after any insertion or removal</strong> — dropping the plain combos list this session shifted 6.8 to 6.7 and left two stale cross-references behind.</p>
+  <p class="lede">This handoff is a separate document with no build step. Edit <code>SmartShelf-Handoff.html</code> directly and print it:</p>
+<pre>node -e "const p=require('puppeteer-core');(async()=&gt;{const b=await p.launch({executablePath:process.env.CHROME_PATH,headless:'new'});
+const g=await b.newPage();await g.goto('file://'+require('path').resolve('SmartShelf-Handoff.html'),{waitUntil:'networkidle0'});
+await g.pdf({path:'SmartShelf-Handoff.pdf',format:'A4',printBackground:true});await b.close();})()"</pre>
+</section>
+
+<section>
+  <div class="sechead"><div class="eyebrow">07 — Working tree</div><h2>Uncommitted changes</h2></div>
+  <p class="lede">Both repos have unstaged work. <strong>Nothing has been committed across either session</strong> — no commit or push was requested. Every change described in this document is uncommitted.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Repo</th><th>File</th><th>State</th></tr></thead>
+    <tbody>
+      <tr><td class="m">api</td><td class="m">Controllers/Shelf/DeviceController.cs</td><td>modified — 3.4 store scoping, three combo fixes, duplicate POST route removed; plus refresh-screens and preview fix</td></tr>
+      <tr><td class="m">api</td><td class="m">Controllers/Shelf/QueueController.cs</td><td>modified — <code>QueueNotActivatedException</code> mapped to 409</td></tr>
+      <tr><td class="m">api</td><td class="m">Repository/QueueRepository.cs</td><td>modified — the new exception type, guard rejections logged as Information</td></tr>
+      <tr><td class="m">api</td><td class="m">Controllers/Shelf/MessageController.cs</td><td>untracked — restored controller</td></tr>
+      <tr><td class="m">api</td><td class="m">Repository/DeviceRepository.cs · Interface/IDevice.cs</td><td>modified — <code>storeId</code> on template lookup</td></tr>
+      <tr><td class="m">api</td><td class="m">docs/spec.py · the PDF</td><td>modified — 49 endpoints, 89 pages</td></tr>
+      <tr><td class="m">api</td><td class="m">docs/SmartShelf-Handoff.html · .pdf</td><td>untracked — this document</td></tr>
+      <tr><td class="m">api</td><td class="m">.config/dotnet-tools.json</td><td>modified — <code>dotnet-ef</code> 10.0.11 added as a local tool. Predates both sessions and was missing from the last handoff's table; nobody has accounted for it</td></tr>
+      <tr><td class="m">api</td><td class="m">docs/package.json · package-lock.json · .gitignore · publish profiles</td><td>untracked</td></tr>
+      <tr><td class="m">api</td><td class="m">wwwroot/uploads/images/*</td><td>untracked — test upload artefacts, probably should be ignored</td></tr>
+      <tr><td class="m">web</td><td class="m">core/services/device.service.ts</td><td>modified — unwraps the response envelope; <code>deleteCombo</code> now surfaces the server's refusal message</td></tr>
+      <tr><td class="m">web</td><td class="m">pages/message/create-message · edit-message</td><td>modified — image / custom image only</td></tr>
+      <tr><td class="m">web</td><td class="m">styles.css</td><td>modified</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><div class="eyebrow">08 — Working style</div><h2>How this owner wants it done</h2></div>
+  <ul>
+    <li><strong>Do not widen scope.</strong> “do not change the structure and just add missing endpoints” was said explicitly about the document, and it holds generally. Fix what was asked; raise the rest.</li>
+    <li><strong>Verify against the running system</strong>, not against the document or assumption. Curl the local API, check the database, check the compiled bundle.</li>
+    <li><strong>Do not start or stop their servers casually</strong> — “stop running backend i need to run it manually”. They drive Visual Studio and IIS Express themselves.</li>
+    <li><strong>Report honestly.</strong> Several bugs here survived because a failure was reported as a success. If something is unverified, say so.</li>
+  </ul>
+</section>
+
+<footer>Written at the end of the session it describes, and revised at the end of the one after it. Uncommitted work and unbuilt API changes are the two things to confirm before trusting anything above as live — both are still true, and the unbuilt set is now larger.</footer>
+
+</div>
+
+</body>
+</html>

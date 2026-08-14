@@ -1,0 +1,13 @@
+# Toolchain and build intermediates for the API document.
+# The deliverable (SmartShelf-ESL-Open-API-V1.0.0.pdf) and its sources
+# (spec.py, build.py, topdf.js, icon.svg) are tracked; everything the build
+# creates on the way is not.
+
+node_modules/
+__pycache__/
+
+# Written by build.py, consumed by topdf.js, merged into the final PDF.
+cover.html
+body.html
+cover.pdf
+body.pdf

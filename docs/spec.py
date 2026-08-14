@@ -16,8 +16,8 @@ BRAND = {
     "product": "SmartShelf ESL",
     "title": "SmartShelf ESL\nOpen API",
     "version": "V1.0.0",
-    "website": "www.retailit.lk",
-    "email": "info@retailit.lk",
+    "website": "retailit.lk",
+    "email": "support@retailit.lk",
     "green": "#0b7335",
 }
 
@@ -284,9 +284,14 @@ PARTS.append({
                 "A template belongs to one Minew store and one screen size. Using a template from "
                 "another store, or one whose size does not match the label, is accepted by SmartShelf "
                 "and then rejected by the cloud when the label is bound.",
+                "Pass <code>storeId</code> to list only that store's templates. Omitted, the call "
+                "returns the templates of every store, which is rarely what an integration wants — "
+                "a template from another store is refused by the cloud at bind time.",
             ],
-            "params": [],
-            "demo": "GET /api/device/template/local",
+            "params": [
+                p("storeId", "Query", "Long", "No", "3", "Restricts the list to one store. Strongly recommended."),
+            ],
+            "demo": "GET /api/device/template/local?storeId=3",
             "codes": CODES_READ,
             "returns": '''{
   "success": true,
@@ -304,6 +309,94 @@ PARTS.append({
       "isActive": true
     }
   ]
+}''',
+        },
+        {
+            "name": "Query a template",
+            "url": "https://esl-api.retailit.lk/api/device/template/{id}",
+            "method": "GET",
+            "content_type": "—",
+            "auth": "Bearer token.",
+            "desc":
+                "One template, including the panel size it was designed for. Use it to confirm a "
+                "template belongs to the store and fits the label before binding.",
+            "notes": [
+                "Pass <code>storeId</code>. A template belongs to one store in the Minew cloud, "
+                "and binding one from another store fails at the cloud with <i>template does not "
+                "exist</i>. With <code>storeId</code> supplied, a template outside that store "
+                "answers <code>404</code> here instead — a much clearer failure.",
+                "Template identifiers are long numeric strings. Keep them quoted; parsing one as "
+                "a number loses precision.",
+            ],
+            "params": [
+                p("id", "Path", "String", "Yes", '"2087930462289793024"', "Template identifier."),
+                p("storeId", "Query", "Long", "No", "3", "Store the template must belong to. Strongly recommended."),
+            ],
+            "demo": "GET /api/device/template/2087930462289793024?storeId=3",
+            "codes": [
+                ["200", "Template returned."],
+                ["404", "No such template, or it belongs to another store."],
+                ["500", "Unexpected server error."],
+            ],
+            "returns": '''{
+  "success": true,
+  "message": "Template retrieved successfully.",
+  "responsCode": 200,
+  "result": {
+    "id": "2087930462289793024",
+    "name": "RIT 4.2 Dynamic",
+    "description": "",
+    "screenInch": 4.20,
+    "screenWidth": 400,
+    "screenHeight": 300,
+    "color": "bwry",
+    "orientation": 0,
+    "storeId": 3,
+    "isActive": true
+  }
+}''',
+        },
+        {
+            "name": "Preview a template",
+            "url": "https://esl-api.retailit.lk/api/device/templates/preview",
+            "method": "POST",
+            "content_type": "application/json;charset=utf-8",
+            "auth": "Bearer token.",
+            "desc":
+                "Renders a template as an image, so it can be shown to an operator before it is "
+                "sent to a label. Returns the picture as a base64 bitmap.",
+            "notes": [
+                "Set <code>isBound</code> to <code>false</code> to render the template as "
+                "designed. Set it to <code>true</code>, with <code>mac</code>, to render what a "
+                "particular label is currently displaying — that variant returns nothing unless "
+                "the label is bound to this template.",
+                "<code>storeId</code> accepts either the SmartShelf store id or the Minew cloud "
+                "id. A template belonging to a different store is refused with <code>400</code> "
+                "rather than passed to the cloud.",
+                "The reply is <b>not</b> the standard envelope: it is a single "
+                "<code>data</code> field holding the image as a base64 string, or "
+                "<code>null</code> when the cloud has no preview to give. The image is large — "
+                "commonly several hundred kilobytes.",
+            ],
+            "params": [
+                p("templateId", "Body", "String", "Yes", '"2087930462289793024"', "Template to render."),
+                p("isBound", "Body", "Boolean", "No", "false", "False renders the design; true renders what a label shows."),
+                p("mac", "Body", "String", "No*", '"e0000000be65"', "* Required when <code>isBound</code> is true."),
+                p("storeId", "Body", "String", "No", '"3"', "Store the template must belong to. Quoted."),
+            ],
+            "demo": '''{
+  "templateId": "2087930462289793024",
+  "isBound": false,
+  "storeId": "3"
+}''',
+            "codes": [
+                ["200", "Rendered. Read <code>data</code>."],
+                ["400", "<code>templateId</code> missing, or the template belongs to another store."],
+                ["404", "No such template."],
+                ["500", "Unexpected server error."],
+            ],
+            "returns": '''{
+  "data": "Qk12fgUAAAAAADYAAAAoAAAAkAEAAFwBAAABABgAAAAAAEB+BQA..."
 }''',
         },
     ],
@@ -930,7 +1023,8 @@ PARTS.append({
     "intro":
         "Inspect an individual electronic shelf label and, where necessary, force it to redraw. "
         "Labels are normally bound as part of creating or updating a product; the endpoints here "
-        "exist for diagnosis and recovery.",
+        "exist for diagnosis and recovery. The last five manage the pairings of label and template "
+        "that a redraw refers to.",
     "endpoints": [
         {
             "name": "Query label by MAC address",
@@ -1044,7 +1138,9 @@ PARTS.append({
                 "Use it to recover a label that was asleep or out of range when it was bound, or "
                 "after a template was changed in the Minew console.",
                 "<code>comboId</code> is the <code>deviceTemplateComboId</code> returned by "
-                "<b>Part 4.6</b>.",
+                "<b>Part 4.6</b>. When the product is not known, find the pairing with "
+                "<b>Part 6.7</b> filtered by label, or create-or-reuse it with <b>Part 6.6</b>, "
+                "which returns the same identifier.",
             ],
             "params": [
                 p("comboId", "Body", "Long", "Yes", "6", "Label and template pairing to redraw."),
@@ -1069,6 +1165,392 @@ PARTS.append({
     "msg": "success",
     "data": null
   }
+}''',
+        },
+        {
+            "name": "Register a label",
+            "url": "https://esl-api.retailit.lk/api/device/device",
+            "method": "POST",
+            "content_type": "application/json;charset=utf-8",
+            "auth": "Bearer token. Admin, Manager or Operator.",
+            "desc":
+                "Records a label in SmartShelf. This creates the local record only — see "
+                "<b>Part 6.5</b> to register the same label with the Minew cloud, which is what "
+                "makes it addressable.",
+            "notes": [
+                "<code>macAddress</code> is accepted either bare (<code>e0000000be65</code>) or "
+                "separated (<code>E0:00:00:00:BE:65</code>). It is stored bare and matched that "
+                "way, so the two forms are the same label.",
+                "Screen size is left empty here: the panel dimensions are only knowable from the "
+                "cloud. They are filled in when the label is next read back from Minew, and the "
+                "label can be bound before that happens.",
+                "A MAC already registered and active in the same store is rejected with "
+                "<code>409</code>. A label that was deleted earlier is revived by this call "
+                "rather than duplicated, keeping its identifier and history.",
+            ],
+            "params": [
+                p("macAddress", "Body", "String", "Yes", '"e0000000be65"', "12 hex characters, with or without separators."),
+                p("name", "Body", "String", "Yes", '"Aisle 1 - Shelf 2"', "Display name. Maximum 100 characters."),
+                p("deviceType", "Body", "String", "Yes", '"Minew"', "<code>Minew</code> or <code>Standard</code>."),
+                p("storeId", "Body", "Long", "Yes", "3", "Store the label belongs to. The SmartShelf store id."),
+                p("screenId", "Body", "Long", "No", "null", "Panel size, when already known. Normally left null."),
+                p("ipAddress", "Body", "String", "No", '""', "Standard devices only. Empty or an IPv4 address."),
+                p("battery", "Body", "Int", "No", "100", "Battery percentage. Defaults to 100."),
+                p("statusId", "Body", "Int", "No", "1", "1 Active, 2 Inactive, 3 Offline, 4 Maintenance."),
+                p("isActive", "Body", "Boolean", "No", "true", "Defaults to true."),
+                p("createdUser", "Body", "Int", "No", "42", "Identifier of the user making the change."),
+            ],
+            "demo": '''{
+  "macAddress": "e0000000be65",
+  "name": "Aisle 1 - Shelf 2",
+  "deviceType": "Minew",
+  "storeId": 3,
+  "battery": 100,
+  "statusId": 1,
+  "isActive": true,
+  "createdUser": 42
+}''',
+            "codes": [
+                ["200", "Label registered."],
+                ["400", "A required field is missing, or the MAC or IP address is malformed."],
+                ["409", "That MAC is already registered and active in this store."],
+                ["500", "Unexpected server error."],
+            ],
+            "returns": '''{
+  "success": true,
+  "message": "Device created successfully",
+  "responsCode": 200,
+  "result": {
+    "id": 13,
+    "mac": "e0000000be65",
+    "deviceName": "Aisle 1 - Shelf 2",
+    "deviceType": "Minew",
+    "screenId": null,
+    "screenInch": null,
+    "screenWidth": null,
+    "screenHeight": null,
+    "status": "Active",
+    "battery": 100,
+    "storeId": 3,
+    "storeName": "Colombo City Centre",
+    "isOnline": false
+  }
+}''',
+        },
+        {
+            "name": "Add labels to the cloud",
+            "url": "https://esl-api.retailit.lk/api/device/devices/batch-add-minew",
+            "method": "POST",
+            "content_type": "application/json;charset=utf-8",
+            "auth": "Bearer token. Admin or Manager.",
+            "desc":
+                "Registers labels with the Minew cloud so they can be written to. Send the labels "
+                "recorded by <b>Part 6.4</b>; a label that is not in the cloud cannot be bound.",
+            "notes": [
+                "<b><code>storeId</code> here is the Minew cloud store identifier</b>, not the "
+                "SmartShelf store id used everywhere else in this document. Read it from the "
+                "store's <code>minewStoreId</code>. Sending the local id fails with "
+                "<i>store does not exist</i>.",
+                "The call reports on each MAC separately in <code>results</code>. A label already "
+                "registered in the cloud is counted in <code>failedCount</code> — it is a no-op "
+                "rather than an error, so read the per-MAC entries rather than the counts alone.",
+                "<b>The per-MAC strings come straight from the Minew cloud and are not "
+                "translated.</b> They are usually Chinese — an already-registered label answers "
+                "<code>标签已被添加</code> (<i>label already added</i>). Treat them as opaque "
+                "vendor text for display or logging; do not branch on their wording, since Minew "
+                "can change it. Use <code>addedCount</code> and <code>failedCount</code>, or "
+                "re-read the label with <b>Part 6.1</b>, to decide what actually happened.",
+                "Successfully added labels are then woken so the cloud learns their panel size. "
+                "Their screen dimensions appear in SmartShelf on the next read from the cloud.",
+            ],
+            "params": [
+                p("storeId", "Body", "String", "Yes", '"1967816075357720576"', "Minew cloud store identifier. Quoted — it exceeds 32 bits."),
+                p("macAddresses", "Body", "Array", "Yes", '["e0000000be65"]', "Labels to register. Bare or separated MACs."),
+                p("type", "Body", "Int", "No", "1", "1 electronic shelf label, 5 warning light. Defaults to 1."),
+                p("userId", "Body", "Int", "No", "42", "Identifier of the user making the change."),
+            ],
+            "demo": '''{
+  "storeId": "1967816075357720576",
+  "macAddresses": ["e0000000be65", "c300002e8c2a"],
+  "type": 1,
+  "userId": 42
+}''',
+            "codes": [
+                ["200", "The cloud accepted the request. Read <code>results</code> per label."],
+                ["400", "No MAC addresses supplied, or the store is unknown to the cloud."],
+                ["500", "Unexpected server error."],
+            ],
+            "returns": '''{
+  "success": true,
+  "message": "Devices added successfully. 1 devices added.",
+  "responsCode": 200,
+  "result": {
+    "addedCount": 1,
+    "failedCount": 1,
+    "results": {
+      "e0000000be65": "success",
+      "c300002e8c2a": "标签已被添加"
+    },
+    "wakeUpResult": {
+      "success": true,
+      "wokeCount": 1
+    },
+    "processedAt": "2026-02-11T09:14:22Z"
+  }
+}''',
+        },
+        {
+            "name": "Pair a label with a template",
+            "url": "https://esl-api.retailit.lk/api/device/combos",
+            "method": "POST",
+            "content_type": "application/json;charset=utf-8",
+            "auth": "Bearer token. Admin or Manager only.",
+            "desc":
+                "Pairs a label with a template. The identifier returned is the "
+                "<code>comboId</code> that <b>Part 6.3</b> redraws, and the "
+                "<code>deviceTemplateComboId</code> reported by <b>Part 4.6</b>.",
+            "notes": [
+                "This is not normally required. Creating or updating a product with "
+                "<code>eslAssignments</code> makes the pairing automatically.",
+                "The call is safe to repeat. A pairing that already exists is returned as it "
+                "stands with <code>alreadyExists: true</code>, and nothing is created — so a "
+                "caller that does not know whether the pair exists can send this and read the "
+                "identifier from the reply either way.",
+                "The reply is a plain object, <b>not</b> the standard envelope described in "
+                "Appendix A.",
+                "A template belongs to one store and one screen size. This call accepts a "
+                "mismatched pair; the cloud rejects it later when the label is bound. Confirm the "
+                "template with <b>Part 3.5</b> first.",
+            ],
+            "params": [
+                p("deviceId", "Body", "Int", "Yes", "13", "Label to pair, by SmartShelf identifier."),
+                p("templateId", "Body", "String", "Yes", '"2087661050496290816"', "Template to pair. Keep quoted."),
+                p("isDefault", "Body", "Boolean", "No", "false", "Marks the pairing as the label's standing template."),
+            ],
+            "demo": '''{
+  "deviceId": 13,
+  "templateId": "2087661050496290816",
+  "isDefault": false
+}''',
+            "codes": [
+                ("200", "The pairing was created, or an existing one was returned."),
+                ("400", "<code>deviceId</code> or <code>templateId</code> was not supplied."),
+                ("403", "The user's role does not permit this operation."),
+                ("404", "No such label, or no such template."),
+                ("500", "Unexpected server error."),
+            ],
+            "returns": '''{
+  "id": 6,
+  "deviceId": 13,
+  "templateId": "2087661050496290816",
+  "deviceName": "Minew Device 00be65",
+  "templateName": "4.2_BWRY-2",
+  "screenWidth": 400,
+  "screenHeight": 300,
+  "isDefault": false,
+  "priority": 0,
+  "createdDate": "2026-08-14T05:05:43.9913458",
+  "alreadyExists": true
+}''',
+        },
+        {
+            "name": "Query pairing list",
+            "url": "https://esl-api.retailit.lk/api/device/combos/paged",
+            "method": "GET",
+            "content_type": "—",
+            "auth": "Bearer token.",
+            "desc":
+                "Every label and template pairing, paged and filterable. This is how to find the "
+                "<code>comboId</code> of a pairing that already exists — filter by label, by "
+                "template, or by both.",
+            "notes": [
+                "Filtering by <code>deviceId</code> and <code>templateId</code> together returns "
+                "the single pairing for that pair, which is the quickest route to its "
+                "<code>comboId</code>.",
+                "<code>isActive</code> defaults to <code>true</code>, so deleted pairings are "
+                "excluded unless it is set to <code>false</code> explicitly.",
+            ],
+            "params": [
+                p("pageNumber", "Query", "Int", "No", "1", "Page to return. Defaults to 1."),
+                p("pageSize", "Query", "Int", "No", "20", "Rows per page."),
+                p("deviceId", "Query", "Long", "No", "13", "Restricts the list to one label."),
+                p("templateId", "Query", "String", "No", '"2087661050496290816"', "Restricts the list to one template."),
+                p("isDefault", "Query", "Boolean", "No", "false", "Restricts to standing pairings."),
+                p("isActive", "Query", "Boolean", "No", "true", "Defaults to true."),
+                p("searchTerm", "Query", "String", "No", '"4.2"', "Matches the label or template name."),
+                p("sortBy", "Query", "String", "No", '"createdDate"', "Field to order by."),
+                p("sortDescending", "Query", "Boolean", "No", "true", "Reverses the order."),
+            ],
+            "demo": "GET /api/device/combos/paged?pageNumber=1&pageSize=20&deviceId=13",
+            "codes": [
+                ("200", "Success."),
+                ("401", "Missing, expired or invalid bearer token."),
+                ("500", "Unexpected server error."),
+            ],
+            "returns": '''{
+  "success": true,
+  "message": "Device template combos retrieved successfully",
+  "result": {
+    "items": [
+      {
+        "id": 6,
+        "type": "TEMPLATE",
+        "deviceId": 13,
+        "deviceName": "Minew Device 00be65",
+        "deviceMac": "e0000000be65",
+        "templateId": "2087661050496290816",
+        "templateName": "4.2_BWRY-2",
+        "screenWidth": 400,
+        "screenHeight": 300,
+        "screenInch": 4.20,
+        "battery": 100,
+        "isDefault": false,
+        "priority": 0,
+        "isActive": true,
+        "createdDate": "2026-08-14T05:05:43.9913458"
+      }
+    ],
+    "totalCount": 2,
+    "pageNumber": 1,
+    "pageSize": 20
+  }
+}''',
+        },
+        {
+            "name": "Query a pairing",
+            "url": "https://esl-api.retailit.lk/api/device/combos/{id}",
+            "method": "GET",
+            "content_type": "—",
+            "auth": "Bearer token.",
+            "desc":
+                "One pairing, with the label's MAC address and the template's screen size. Use it "
+                "to confirm a <code>comboId</code> before redrawing with <b>Part 6.3</b>.",
+            "notes": [
+                "An identifier that does not exist answers <code>404</code>.",
+            ],
+            "params": [
+                p("id", "Path", "Long", "Yes", "6", "Pairing identifier."),
+            ],
+            "demo": "GET /api/device/combos/6",
+            "codes": [
+                ("200", "The pairing was returned."),
+                ("401", "Missing, expired or invalid bearer token."),
+                ("404", "No pairing has that identifier."),
+                ("500", "Unexpected server error."),
+            ],
+            "returns": '''{
+  "success": true,
+  "message": "DeviceTemplateCombo retrieved successfully.",
+  "responsCode": 200,
+  "result": {
+    "id": 6,
+    "type": "TEMPLATE",
+    "deviceId": 13,
+    "deviceName": "Minew Device 00be65",
+    "deviceMac": "e0000000be65",
+    "templateId": "2087661050496290816",
+    "templateName": "4.2_BWRY-2",
+    "screenWidth": 400,
+    "screenHeight": 300,
+    "screenInch": 4.20,
+    "battery": 100,
+    "isDefault": false,
+    "priority": 0,
+    "isActive": true,
+    "createdDate": "2026-08-14T05:05:43.9913458"
+  }
+}''',
+        },
+        {
+            "name": "Modify a pairing",
+            "url": "https://esl-api.retailit.lk/api/device/combos/{id}",
+            "method": "PUT",
+            "content_type": "application/json;charset=utf-8",
+            "auth": "Bearer token. Admin or Manager only.",
+            "desc":
+                "Repoints a pairing at a different label or template, or changes whether it is the "
+                "label's standing pairing.",
+            "notes": [
+                "All four body fields are written on every call. A field that is omitted is "
+                "written as its default — send the pairing's current values for anything that "
+                "should not change.",
+                "Repointing a pairing onto a label and template that another active pairing "
+                "already covers answers <code>409</code> and changes nothing.",
+                "The reply carries the stored record rather than the fuller shape returned by "
+                "<b>Part 6.8</b>; the label and template names are not included.",
+                "This does not redraw the label. Follow with <b>Part 6.3</b> to push the change.",
+            ],
+            "params": [
+                p("id", "Path", "Long", "Yes", "6", "Pairing to modify."),
+                p("deviceId", "Body", "Int", "Yes", "13", "Label the pairing points at."),
+                p("templateId", "Body", "String", "Yes", '"2087661050496290816"', "Template the pairing points at."),
+                p("isDefault", "Body", "Boolean", "No", "false", "Marks it as the label's standing template."),
+                p("isActive", "Body", "Boolean", "No", "true", "Set false to retire the pairing."),
+            ],
+            "demo": '''{
+  "deviceId": 13,
+  "templateId": "2087661050496290816",
+  "isDefault": true,
+  "isActive": true
+}''',
+            "codes": [
+                ("200", "The pairing was updated."),
+                ("400", "<code>deviceId</code> or <code>templateId</code> was not supplied."),
+                ("403", "The user's role does not permit this operation."),
+                ("404", "No pairing has that identifier."),
+                ("409", "Another active pairing already covers that label and template."),
+                ("500", "Unexpected server error."),
+            ],
+            "returns": '''{
+  "success": true,
+  "message": "DeviceTemplateCombo updated successfully",
+  "responsCode": 200,
+  "result": {
+    "id": 6,
+    "deviceId": 13,
+    "templateId": "2087661050496290816",
+    "isDefault": false,
+    "isActive": true,
+    "priority": 0,
+    "createdDate": "2026-08-14T05:05:43.9913458",
+    "updatedDate": "2026-08-14T06:49:15.5271232Z",
+    "updatedUser": 0
+  }
+}''',
+        },
+        {
+            "name": "Delete a pairing",
+            "url": "https://esl-api.retailit.lk/api/device/combos/{id}/user/{userId}",
+            "method": "DELETE",
+            "content_type": "—",
+            "auth": "Bearer token. Admin or Manager only.",
+            "desc":
+                "Retires a pairing. The record is kept and marked inactive rather than removed, so "
+                "the history of what a label displayed stays intact.",
+            "notes": [
+                "A pairing still used by an active product binding cannot be retired. That refusal "
+                "answers <code>409</code> and names the reason in <code>message</code>. Unbind the "
+                "product first with <b>Part 4.4</b>, then retire the pairing.",
+                "Retiring a pairing does not clear the label. It goes on showing whatever was last "
+                "written to it.",
+            ],
+            "params": [
+                p("id", "Path", "Long", "Yes", "6", "Pairing to retire."),
+                p("userId", "Path", "Int", "Yes", "42", "Identifier of the user making the change."),
+            ],
+            "demo": "DELETE /api/device/combos/6/user/42",
+            "codes": [
+                ("200", "The pairing was retired."),
+                ("403", "The user's role does not permit this operation."),
+                ("404", "No pairing has that identifier."),
+                ("409", "The pairing is still used by an active product binding."),
+                ("500", "Unexpected server error."),
+            ],
+            "returns": '''{
+  "success": true,
+  "message": "Combo deleted successfully",
+  "responsCode": 200,
+  "result": true
 }''',
         },
     ],
@@ -1444,12 +1926,22 @@ PARTS.append({
                 "The schedule remains <b>Completed</b> rather than reverting to Pending, so the "
                 "history stays accurate. Its <code>isActive</code> flag is cleared, which is also "
                 "what makes it eligible for deletion.",
+                "Only a schedule that has run can be stopped. One still waiting for its start time "
+                "has put nothing on a label, so this call answers <code>409</code> and changes "
+                "nothing. Delete it instead, or let it run.",
             ],
             "params": [
                 p("id", "Path", "Long", "Yes", "13", "Schedule identifier."),
             ],
             "demo": "POST /api/queue/13/deactivate",
-            "codes": CODES_STANDARD,
+            "codes": [
+                ("200", "Stopped. The label's previous display is restored."),
+                ("401", "Missing, expired or invalid bearer token."),
+                ("403", "The signed-in user's role does not permit this operation."),
+                ("404", "Unknown schedule."),
+                ("409", "The schedule has not run, so there is nothing to stop."),
+                ("500", "Unexpected server error."),
+            ],
             "returns": '''{
   "success": true,
   "message": "Queue deactivated successfully",
@@ -1520,6 +2012,435 @@ PARTS.append({
 # Appendices
 # ---------------------------------------------------------------------------
 
+PARTS.append({
+    "title": "Message API",
+    "intro":
+        "Messages are the pictures a label can display alongside its template — a promotion "
+        "graphic, a seasonal banner, a shelf notice. A message is created once, then referenced "
+        "by identifier when binding a label or scheduling one.",
+    "prose": [
+        ("Two kinds of message",
+         "An <b>image</b> message is a file you upload. A <b>custom image</b> is composed in the "
+         "portal's designer and arrives as a base64 string together with the canvas description "
+         "that allows it to be reopened and edited. Both end up as a picture on the label; only "
+         "the way they are supplied differs."),
+        ("Match the message to the label's screen",
+         "<code>screenSizeId</code> ties a message to a panel size, so a picture drawn for a "
+         "296&times;128 label is not offered for a 400&times;300 one. Read the available sizes "
+         "from <b>Part 3</b> and send the identifier that matches the label you intend to bind."),
+        ("A message is not displayed until it is bound",
+         "Creating a message stores it. It reaches a label only when that label is bound with the "
+         "message, or when a schedule carrying it runs."),
+    ],
+    "endpoints": [
+        {
+            "name": "Query message list",
+            "url": "https://esl-api.retailit.lk/api/message",
+            "method": "GET",
+            "content_type": "—",
+            "auth": "Bearer token.",
+            "desc":
+                "Every active message for a store, newest first. Supplies the values used as "
+                "<code>messageId</code> when binding or scheduling a label.",
+            "params": [
+                p("storeId", "Query", "Long", "No", "3", "Store to list messages for. Omit to list across stores."),
+            ],
+            "demo": "GET /api/message?storeId=3",
+            "codes": CODES_READ,
+            "returns": '''{
+  "success": true,
+  "message": "Messages retrieved successfully",
+  "responsCode": 200,
+  "result": [
+    {
+      "id": 12,
+      "title": "Hot Chocolate",
+      "contentType": 2,
+      "duration": 5,
+      "storeId": 3,
+      "screenSizeId": 4,
+      "isActive": true,
+      "createdDate": "2026-02-11T09:14:22Z"
+    }
+  ]
+}''',
+        },
+        {
+            "name": "Query message list (paged)",
+            "url": "https://esl-api.retailit.lk/api/message/paged",
+            "method": "GET",
+            "content_type": "—",
+            "auth": "Bearer token.",
+            "desc":
+                "The same list with paging, sorting and filters, for a management screen rather "
+                "than a lookup.",
+            "params": [
+                p("storeId", "Query", "Long", "No", "3", "Store to list messages for."),
+                p("pageNumber", "Query", "Int", "No", "1", "Page number. Defaults to 1."),
+                p("pageSize", "Query", "Int", "No", "10", "Rows per page. Defaults to 10."),
+                p("title", "Query", "String", "No", '"Hot"', "Filters on message title."),
+                p("contentType", "Query", "Int", "No", "2", "Restricts to one kind. See the table at the end of this part."),
+                p("isActive", "Query", "Boolean", "No", "true", "Defaults to true."),
+                p("sortBy", "Query", "String", "No", '"createdDate"', "Column to sort on."),
+            ],
+            "demo": "GET /api/message/paged?storeId=3&pageNumber=1&pageSize=10&contentType=2",
+            "codes": CODES_READ,
+            "returns": '''{
+  "success": true,
+  "message": "Messages retrieved successfully",
+  "responsCode": 200,
+  "result": {
+    "items": [
+      { "id": 12, "title": "Hot Chocolate", "contentType": 2, "duration": 5, "screenSizeId": 4, "isActive": true }
+    ],
+    "totalCount": 1,
+    "pageNumber": 1,
+    "pageSize": 10,
+    "totalPages": 1
+  }
+}''',
+        },
+        {
+            "name": "Query a message",
+            "url": "https://esl-api.retailit.lk/api/message/{id}",
+            "method": "GET",
+            "content_type": "—",
+            "auth": "Bearer token.",
+            "desc":
+                "One message including its content. Use this to retrieve the picture for preview, "
+                "or the canvas description needed to reopen a custom image for editing.",
+            "params": [
+                p("id", "Path", "Long", "Yes", "12", "Message identifier."),
+                p("storeId", "Query", "Long", "No", "3", "Restricts the lookup to one store."),
+            ],
+            "demo": "GET /api/message/12?storeId=3",
+            "codes": CODES_READ,
+            "returns": '''{
+  "success": true,
+  "message": "Message retrieved successfully",
+  "responsCode": 200,
+  "result": {
+    "id": 12,
+    "title": "Hot Chocolate",
+    "contentType": 2,
+    "contentData": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ...",
+    "duration": 5,
+    "storeId": 3,
+    "screenSizeId": 4,
+    "isActive": true
+  }
+}''',
+        },
+        {
+            "name": "Query messages by identifier",
+            "url": "https://esl-api.retailit.lk/api/message/messages/by-ids",
+            "method": "POST",
+            "content_type": "application/json;charset=utf-8",
+            "auth": "Bearer token.",
+            "desc":
+                "Several messages in one call, given their identifiers. Intended for a screen that "
+                "holds a list of message references and needs their titles and content together.",
+            "params": [
+                p("body", "Body", "Array", "Yes", "[12, 13]", "Message identifiers."),
+                p("storeId", "Query", "Long", "No", "3", "Restricts the lookup to one store."),
+            ],
+            "demo": '''POST /api/message/messages/by-ids?storeId=3
+
+[12, 13]''',
+            "codes": CODES_READ,
+            "returns": '''{
+  "success": true,
+  "message": "Messages retrieved successfully",
+  "responsCode": 200,
+  "result": [
+    { "id": 12, "title": "Hot Chocolate", "contentType": 2, "screenSizeId": 4 },
+    { "id": 13, "title": "Winter Offer",  "contentType": 4, "screenSizeId": 4 }
+  ]
+}''',
+        },
+        {
+            "name": "Create an image message",
+            "url": "https://esl-api.retailit.lk/api/message/image",
+            "method": "POST",
+            "content_type": "multipart/form-data",
+            "auth": "Bearer token. Admin, Manager or Operator.",
+            "desc":
+                "Uploads a picture file and stores it as a message. The file is sent as form data "
+                "rather than JSON, so the request is an ordinary multipart upload.",
+            "notes": [
+                "Prepare the picture at the label's own pixel size. An oversized file is stored as "
+                "sent and slows every bind that carries it.",
+                "<code>screenSizeId</code> should match the label the message is intended for; read "
+                "the available sizes from <b>Part 3</b>.",
+            ],
+            "params": [
+                p("image", "Form", "File", "Yes", "promo.jpg", "The picture to store."),
+                p("title", "Form", "String", "Yes", '"Hot Chocolate"', "Display name for the message."),
+                p("duration", "Form", "Int", "Yes", "5", "Seconds the picture is shown when part of a rotation."),
+                p("createdBy", "Form", "Int", "Yes", "42", "Identifier of the user making the change."),
+                p("storeId", "Form", "Long", "No", "3", "Store the message belongs to."),
+                p("screenSizeId", "Form", "Long", "No", "4", "Panel size the picture was prepared for."),
+            ],
+            "demo": '''POST /api/message/image
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="image"; filename="promo.jpg"
+Content-Type: image/jpeg
+
+<binary image data>
+------Boundary
+Content-Disposition: form-data; name="title"
+
+Hot Chocolate
+------Boundary
+Content-Disposition: form-data; name="duration"
+
+5
+------Boundary
+Content-Disposition: form-data; name="createdBy"
+
+42
+------Boundary
+Content-Disposition: form-data; name="storeId"
+
+3
+------Boundary
+Content-Disposition: form-data; name="screenSizeId"
+
+4
+------Boundary--''',
+            "codes": CODES_STANDARD,
+            "returns": '''{
+  "success": true,
+  "message": "Image message uploaded successfully.",
+  "responsCode": 200,
+  "result": {
+    "id": 12,
+    "title": "Hot Chocolate",
+    "contentType": 2,
+    "duration": 5,
+    "storeId": 3,
+    "screenSizeId": 4,
+    "isActive": true
+  }
+}''',
+        },
+        {
+            "name": "Create a custom image message",
+            "url": "https://esl-api.retailit.lk/api/message/custom-image",
+            "method": "POST",
+            "content_type": "application/json;charset=utf-8",
+            "auth": "Bearer token. Admin, Manager or Operator.",
+            "desc":
+                "Stores a picture composed in the portal's designer. The rendered picture is sent as "
+                "base64 and is what reaches the label; the canvas description is stored alongside it "
+                "so the design can be reopened and amended later.",
+            "notes": [
+                "<code>imageData</code> is what reaches the label. <code>fabricJsData</code> is the "
+                "editable description of the same design and is never sent to the label.",
+                "Send <code>image_data</code> as a data URI, exactly as the designer produces it.",
+                "This endpoint names its fields in snake_case — <code>image_data</code>, "
+                "<code>fabric_js_data</code>, <code>created_by</code> — and <code>StoreId</code> "
+                "with a capital S. <b>Replace a custom image message</b> uses camelCase "
+                "instead. Send each exactly as shown.",
+            ],
+            "params": [
+                p("title", "Body", "String", "Yes", '"Winter Offer"', "Display name for the message."),
+                p("image_data", "Body", "String", "Yes", '"data:image/png;base64,iVBORw0..."', "Rendered picture, base64 encoded."),
+                p("fabric_js_data", "Body", "String", "No", '"{...}"', "Canvas description, so the design can be reopened."),
+                p("duration", "Body", "Int", "No", "5", "Seconds shown in a rotation. Defaults to 5."),
+                p("created_by", "Body", "Int", "Yes", "42", "Identifier of the user making the change."),
+                p("StoreId", "Body", "Long", "No", "3", "Store the message belongs to. Note the capital S."),
+                p("screenSizeId", "Body", "Long", "No", "4", "Panel size the design was drawn for."),
+            ],
+            "demo": '''{
+  "title": "Winter Offer",
+  "image_data": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
+  "fabric_js_data": "{\\"version\\":\\"5.3.0\\",\\"objects\\":[...]}",
+  "duration": 5,
+  "created_by": 42,
+  "StoreId": 3,
+  "screenSizeId": 4
+}''',
+            "codes": CODES_STANDARD,
+            "returns": '''{
+  "success": true,
+  "message": "Custom image message created successfully.",
+  "responsCode": 200,
+  "result": {
+    "id": 13,
+    "title": "Winter Offer",
+    "contentType": 4,
+    "duration": 5,
+    "storeId": 3,
+    "screenSizeId": 4,
+    "isActive": true
+  }
+}''',
+        },
+        {
+            "name": "Modify a message",
+            "url": "https://esl-api.retailit.lk/api/message/{id}",
+            "method": "PUT",
+            "content_type": "application/json;charset=utf-8",
+            "auth": "Bearer token. Admin, Manager or Operator.",
+            "desc":
+                "Amends a message's title, duration or active state without replacing the picture. "
+                "Setting <code>isActive</code> to false retires it.",
+            "notes": [
+                "A label already displaying this message does not change until it is bound again or "
+                "its schedule next runs.",
+            ],
+            "params": [
+                p("id", "Path", "Long", "Yes", "12", "Message identifier."),
+                p("title", "Body", "String", "No", '"Hot Chocolate"', "Display name."),
+                p("contentData", "Body", "String", "No", '"data:image/jpeg;base64,..."', "Replacement picture, base64 encoded."),
+                p("duration", "Body", "Int", "No", "8", "Seconds shown in a rotation."),
+                p("isActive", "Body", "Boolean", "No", "true", "Set false to retire the message."),
+                p("updatedUser", "Body", "Int", "Yes", "42", "Identifier of the user making the change."),
+                p("storeId", "Body", "Long", "No", "3", "Store the message belongs to."),
+                p("screenSizeId", "Body", "Long", "No", "4", "Panel size the picture was prepared for."),
+            ],
+            "demo": '''{
+  "title": "Hot Chocolate",
+  "duration": 8,
+  "isActive": true,
+  "updatedUser": 42,
+  "storeId": 3,
+  "screenSizeId": 4
+}''',
+            "codes": CODES_STANDARD,
+            "returns": '''{
+  "success": true,
+  "message": "Message updated successfully",
+  "responsCode": 200,
+  "result": { "id": 12, "title": "Hot Chocolate", "duration": 8, "isActive": true }
+}''',
+        },
+        {
+            "name": "Replace an image message",
+            "url": "https://esl-api.retailit.lk/api/message/image/{id}",
+            "method": "PUT",
+            "content_type": "multipart/form-data",
+            "auth": "Bearer token. Admin, Manager or Operator.",
+            "desc":
+                "Uploads a new picture over an existing image message, keeping its identifier so "
+                "every label and schedule already referencing it stays valid.",
+            "params": [
+                p("id", "Path", "Long", "Yes", "12", "Message identifier."),
+                p("image", "Form", "File", "Yes", "promo-v2.jpg", "Replacement picture."),
+                p("title", "Form", "String", "Yes", '"Hot Chocolate"', "Display name."),
+                p("duration", "Form", "Int", "Yes", "5", "Seconds shown in a rotation."),
+                p("updatedBy", "Form", "Int", "Yes", "42", "Identifier of the user making the change."),
+                p("storeId", "Form", "Long", "No", "3", "Store the message belongs to."),
+                p("screenSizeId", "Form", "Long", "No", "4", "Panel size the picture was prepared for."),
+            ],
+            "demo": '''PUT /api/message/image/12
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="image"; filename="promo-v2.jpg"
+Content-Type: image/jpeg
+
+<binary image data>
+------Boundary
+Content-Disposition: form-data; name="title"
+
+Hot Chocolate
+------Boundary
+Content-Disposition: form-data; name="duration"
+
+5
+------Boundary
+Content-Disposition: form-data; name="updatedBy"
+
+42
+------Boundary--''',
+            "codes": CODES_STANDARD,
+            "returns": '''{
+  "success": true,
+  "message": "Image message updated successfully.",
+  "responsCode": 200,
+  "result": { "id": 12, "title": "Hot Chocolate", "contentType": 2, "duration": 5 }
+}''',
+        },
+        {
+            "name": "Replace a custom image message",
+            "url": "https://esl-api.retailit.lk/api/message/custom-image/{id}",
+            "method": "PUT",
+            "content_type": "application/json;charset=utf-8",
+            "auth": "Bearer token. Admin, Manager or Operator.",
+            "desc":
+                "Stores an amended design over an existing custom image message, keeping its "
+                "identifier.",
+            "params": [
+                p("id", "Path", "Long", "Yes", "13", "Message identifier."),
+                p("title", "Body", "String", "Yes", '"Winter Offer"', "Display name."),
+                p("imageData", "Body", "String", "Yes", '"data:image/png;base64,iVBORw0..."', "Re-rendered picture, base64 encoded."),
+                p("fabricJsData", "Body", "String", "No", '"{...}"', "Amended canvas description."),
+                p("duration", "Body", "Int", "No", "5", "Seconds shown in a rotation."),
+                p("isActive", "Body", "Boolean", "No", "true", "Set false to retire the message."),
+                p("updatedBy", "Body", "Int", "Yes", "42", "Identifier of the user making the change."),
+            ],
+            "demo": '''{
+  "id": 13,
+  "title": "Winter Offer",
+  "imageData": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
+  "fabricJsData": "{\\"version\\":\\"5.3.0\\",\\"objects\\":[...]}",
+  "duration": 5,
+  "isActive": true,
+  "updatedBy": 42
+}''',
+            "codes": CODES_STANDARD,
+            "returns": '''{
+  "success": true,
+  "message": "Custom image message updated successfully.",
+  "responsCode": 200,
+  "result": { "id": 13, "title": "Winter Offer", "contentType": 4, "duration": 5 }
+}''',
+        },
+        {
+            "name": "Delete a message",
+            "url": "https://esl-api.retailit.lk/api/message/{id}",
+            "method": "DELETE",
+            "content_type": "—",
+            "auth": "Bearer token. Admin or Manager.",
+            "desc":
+                "Retires a message. The record is kept so that history referring to it stays "
+                "readable; it stops appearing in the message list and can no longer be bound.",
+            "notes": [
+                "A label currently displaying the message keeps showing it until it is bound to "
+                "something else — deleting the message does not clear the label.",
+            ],
+            "params": [
+                p("id", "Path", "Long", "Yes", "12", "Message identifier."),
+                p("userId", "Query", "Int", "Yes", "42", "Identifier of the user making the change."),
+                p("storeId", "Query", "Long", "No", "3", "Store the message belongs to."),
+            ],
+            "demo": "DELETE /api/message/12?userId=42&storeId=3",
+            "codes": CODES_STANDARD,
+            "returns": '''{
+  "success": true,
+  "message": "Message deleted successfully",
+  "responsCode": 200,
+  "result": true
+}''',
+        },
+    ],
+    "tables": {
+        "Message kinds": {
+            "head": ["Value", "Kind", "Created by"],
+            "rows": [
+                ["<code>2</code>", "Image",
+                 "<b>Create an image message</b> — a picture file uploaded as form data."],
+                ["<code>4</code>", "Custom image",
+                 "<b>Create a custom image message</b> — a design composed in the portal's designer."],
+            ],
+        },
+    },
+})
+
 APPENDICES = [
     {
         "letter": "A",
@@ -1559,7 +2480,7 @@ APPENDICES = [
                 ["401", "Unauthorised", "No token, an expired token, or the email address was sent instead of the Employee ID."],
                 ["403", "Forbidden", "The signed-in user holds the Viewer role, or the operation requires Admin or Manager."],
                 ["404", "Not found", "No record matched. For product lookups, check that storeId is correct."],
-                ["409", "Conflict", "An overlapping schedule exists, a schedule has already run, or a schedule is still displaying."],
+                ["409", "Conflict", "The schedule's state does not allow the operation: an overlapping schedule exists, it has already run, it has not yet run, or it is still displaying."],
                 ["500", "Server error", "Unexpected fault. <code>error</code> carries the detail."],
             ],
         },
@@ -1594,6 +2515,10 @@ APPENDICES = [
                  "Inspect existing schedules with <b>Part 7.7</b>, then amend or delete the conflicting one."],
                 ["<code>409</code> when deleting a schedule", "It is still within its display period.",
                  "Stop it with <b>Part 7.10</b>, then delete."],
+                ["A <code>comboId</code> is needed but only the label is known", "The pairing identifier is not carried by the label lookup.",
+                 "Filter <b>Part 6.7</b> by <code>deviceId</code>, or send <b>Part 6.6</b> for the label and template — an existing pairing is returned rather than duplicated."],
+                ["<code>409</code> when stopping a schedule", "It has not run yet, so nothing is displaying.",
+                 "Only a schedule that has run can be stopped. Delete it with <b>Part 7.11</b>, or let it run first."],
             ],
         },
     },
