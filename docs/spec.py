@@ -26,9 +26,8 @@ HISTORY = [
 ]
 
 NOTE = [
-    "All URLs in this document are relative to the base address of your SmartShelf "
-    "deployment. Replace <code>https://your-server</code> with the address supplied to you — "
-    "for a local installation this is normally <code>http://localhost:5000</code>.",
+    "All endpoints are served from <code>https://esl-api.retailit.lk</code>. The full URL is "
+    "given with each endpoint and may be used as printed. Requests must be made over HTTPS.",
 
     "Every request except <b>Log in</b> requires the bearer token returned by "
     "<b>Part 2.1</b>, sent as the header <code>Authorization: Bearer &lt;token&gt;</code>.",
@@ -84,8 +83,9 @@ PARTS.append({
         "endpoints. Read it once before working through the parts that follow.",
     "prose": [
         ("Base address",
-         "Every URL is shown relative to your deployment's base address. Substitute the address "
-         "supplied to you wherever <code>https://your-server</code> appears."),
+         "Every endpoint in this document is served from <code>https://esl-api.retailit.lk</code>. "
+         "URLs are printed in full and require no substitution. All traffic is over HTTPS; plain "
+         "HTTP requests are not accepted."),
         ("Authentication",
          "SmartShelf uses bearer-token authentication. Call <b>Part 2.1 Log in</b> once, then send "
          "the returned token on every subsequent request as the header "
@@ -115,7 +115,7 @@ PARTS.append({
         "Obtain the bearer token used by every other endpoint in this document.",
     "endpoints": [{
         "name": "Log in",
-        "url": "https://your-server/api/auth/login",
+        "url": "https://esl-api.retailit.lk/api/auth/login",
         "method": "POST",
         "content_type": "application/json;charset=utf-8",
         "auth": "None. This is the only endpoint that does not require a token.",
@@ -174,7 +174,7 @@ PARTS.append({
     "endpoints": [
         {
             "name": "Query category list",
-            "url": "https://your-server/api/products/all-categories",
+            "url": "https://esl-api.retailit.lk/api/products/all-categories",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -207,7 +207,7 @@ PARTS.append({
         },
         {
             "name": "Query sub-category list",
-            "url": "https://your-server/api/products/active-subcategories",
+            "url": "https://esl-api.retailit.lk/api/products/active-subcategories",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -240,7 +240,7 @@ PARTS.append({
         },
         {
             "name": "Query label list",
-            "url": "https://your-server/api/device/devices/local",
+            "url": "https://esl-api.retailit.lk/api/device/devices/local",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -271,7 +271,7 @@ PARTS.append({
         },
         {
             "name": "Query template list",
-            "url": "https://your-server/api/device/template/local",
+            "url": "https://esl-api.retailit.lk/api/device/template/local",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -319,7 +319,7 @@ PARTS.append({
     "endpoints": [
         {
             "name": "Add product",
-            "url": "https://your-server/api/products/product",
+            "url": "https://esl-api.retailit.lk/api/products/product",
             "method": "POST",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -394,7 +394,7 @@ PARTS.append({
         },
         {
             "name": "Add product with labels",
-            "url": "https://your-server/api/products/with-esl",
+            "url": "https://esl-api.retailit.lk/api/products/with-esl",
             "method": "POST",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -471,7 +471,7 @@ PARTS.append({
         },
         {
             "name": "Modify product",
-            "url": "https://your-server/api/products/product/{id}",
+            "url": "https://esl-api.retailit.lk/api/products/product/{id}",
             "method": "PUT",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -519,7 +519,7 @@ PARTS.append({
         },
         {
             "name": "Modify product with labels",
-            "url": "https://your-server/api/products/{id}/with-esl",
+            "url": "https://esl-api.retailit.lk/api/products/{id}/with-esl",
             "method": "PUT",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -577,7 +577,7 @@ PARTS.append({
         },
         {
             "name": "Query product list",
-            "url": "https://your-server/api/products",
+            "url": "https://esl-api.retailit.lk/api/products",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -631,7 +631,7 @@ PARTS.append({
         },
         {
             "name": "Query product by product code",
-            "url": "https://your-server/api/products/by-code/{productCode}",
+            "url": "https://esl-api.retailit.lk/api/products/by-code/{productCode}",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -699,7 +699,7 @@ PARTS.append({
         },
         {
             "name": "Query product by identifier",
-            "url": "https://your-server/api/products/{id}/details",
+            "url": "https://esl-api.retailit.lk/api/products/{id}/details",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -716,7 +716,7 @@ PARTS.append({
         },
         {
             "name": "Delete product",
-            "url": "https://your-server/api/products/product/{id}",
+            "url": "https://esl-api.retailit.lk/api/products/product/{id}",
             "method": "DELETE",
             "content_type": "—",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -762,7 +762,7 @@ PARTS.append({
     "endpoints": [
         {
             "name": "Add products in batch",
-            "url": "https://your-server/api/products/bulk",
+            "url": "https://esl-api.retailit.lk/api/products/bulk",
             "method": "POST",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -856,7 +856,7 @@ PARTS.append({
         },
         {
             "name": "Modify products and prices in batch",
-            "url": "https://your-server/api/products/bulk",
+            "url": "https://esl-api.retailit.lk/api/products/bulk",
             "method": "PUT",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -934,7 +934,7 @@ PARTS.append({
     "endpoints": [
         {
             "name": "Query label by MAC address",
-            "url": "https://your-server/api/device/device/by-mac/{mac}",
+            "url": "https://esl-api.retailit.lk/api/device/device/by-mac/{mac}",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -1002,7 +1002,7 @@ PARTS.append({
         },
         {
             "name": "Query label by identifier",
-            "url": "https://your-server/api/device/device/{id}",
+            "url": "https://esl-api.retailit.lk/api/device/device/{id}",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -1032,7 +1032,7 @@ PARTS.append({
         },
         {
             "name": "Redraw label",
-            "url": "https://your-server/api/device/bind",
+            "url": "https://esl-api.retailit.lk/api/device/bind",
             "method": "POST",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin or Manager only.",
@@ -1098,7 +1098,7 @@ PARTS.append({
     "endpoints": [
         {
             "name": "Add schedule",
-            "url": "https://your-server/api/queue/direct",
+            "url": "https://esl-api.retailit.lk/api/queue/direct",
             "method": "POST",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -1170,7 +1170,7 @@ PARTS.append({
         },
         {
             "name": "Add schedule from an existing binding",
-            "url": "https://your-server/api/queue/from-assignment",
+            "url": "https://esl-api.retailit.lk/api/queue/from-assignment",
             "method": "POST",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -1212,7 +1212,7 @@ PARTS.append({
         },
         {
             "name": "Query schedule list",
-            "url": "https://your-server/api/queue",
+            "url": "https://esl-api.retailit.lk/api/queue",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -1256,7 +1256,7 @@ PARTS.append({
         },
         {
             "name": "Query schedule and execution history",
-            "url": "https://your-server/api/queue/{id}",
+            "url": "https://esl-api.retailit.lk/api/queue/{id}",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -1295,7 +1295,7 @@ PARTS.append({
         },
         {
             "name": "Query upcoming schedules",
-            "url": "https://your-server/api/queue/upcoming",
+            "url": "https://esl-api.retailit.lk/api/queue/upcoming",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -1327,7 +1327,7 @@ PARTS.append({
         },
         {
             "name": "Query active schedules",
-            "url": "https://your-server/api/queue/active",
+            "url": "https://esl-api.retailit.lk/api/queue/active",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -1339,7 +1339,7 @@ PARTS.append({
         },
         {
             "name": "Query schedules for a label",
-            "url": "https://your-server/api/queue/device/{deviceId}",
+            "url": "https://esl-api.retailit.lk/api/queue/device/{deviceId}",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",
@@ -1355,7 +1355,7 @@ PARTS.append({
         },
         {
             "name": "Modify schedule",
-            "url": "https://your-server/api/queue/{id}",
+            "url": "https://esl-api.retailit.lk/api/queue/{id}",
             "method": "PUT",
             "content_type": "application/json;charset=utf-8",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -1396,7 +1396,7 @@ PARTS.append({
         },
         {
             "name": "Run schedule immediately",
-            "url": "https://your-server/api/queue/{id}/activate",
+            "url": "https://esl-api.retailit.lk/api/queue/{id}/activate",
             "method": "POST",
             "content_type": "—",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -1434,7 +1434,7 @@ PARTS.append({
         },
         {
             "name": "Stop schedule",
-            "url": "https://your-server/api/queue/{id}/deactivate",
+            "url": "https://esl-api.retailit.lk/api/queue/{id}/deactivate",
             "method": "POST",
             "content_type": "—",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -1463,7 +1463,7 @@ PARTS.append({
         },
         {
             "name": "Delete schedule",
-            "url": "https://your-server/api/queue/{id}",
+            "url": "https://esl-api.retailit.lk/api/queue/{id}",
             "method": "DELETE",
             "content_type": "—",
             "auth": "Bearer token. Admin, Manager or Operator.",
@@ -1490,7 +1490,7 @@ PARTS.append({
         },
         {
             "name": "Query priority list",
-            "url": "https://your-server/api/queue/prioritytypes",
+            "url": "https://esl-api.retailit.lk/api/queue/prioritytypes",
             "method": "GET",
             "content_type": "—",
             "auth": "Bearer token.",

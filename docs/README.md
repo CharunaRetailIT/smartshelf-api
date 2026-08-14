@@ -53,6 +53,10 @@ silently flattens the other.
 
 ## Before sending to a client
 
+Endpoints are documented against `https://esl-api.retailit.lk`. If the client is
+served from a different host, change it in `spec.py` — it appears in each
+endpoint's `url` and in the base-address wording in Part 1 and the Note page.
+
 The cover and footer carry `www.retailit.lk` and `info@retailit.lk`, set in the
 `BRAND` block at the top of `spec.py`. Sample values throughout (store 3,
 "Colombo City Centre", the product codes and template identifier) come from the
