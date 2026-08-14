@@ -436,11 +436,15 @@ namespace TERMS_LOYALTY_API.Controllers
         /// <summary>
         /// Retires a running queue. It stays Completed rather than reverting to Pending so the
         /// history stays truthful, and IsActive is cleared - which is also what makes it deletable.
+        ///
+        /// Only a queue that has actually run can be deactivated; one that never was
+        /// answers 409.
         /// </summary>
         [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost("{id}/deactivate")]
         [ProducesResponseType(typeof(HttpResponseData<QueueDto>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 404)]
+        [ProducesResponseType(typeof(HttpResponseData<object>), 409)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
         public async Task<IActionResult> DeactivateQueue(long id)
         {
@@ -463,6 +467,18 @@ namespace TERMS_LOYALTY_API.Controllers
                     Success = false,
                     Message = ex.Message,
                     ResponsCode = 404
+                });
+            }
+            catch (QueueNotActivatedException ex)
+            {
+                // Nothing has run, so there is nothing to retire. A conflict with
+                // the queue's current state, not a server fault - this used to fall
+                // through to the catch-all below and answer 500.
+                return Conflict(new HttpResponseData<object>
+                {
+                    Success = false,
+                    Message = ex.Message,
+                    ResponsCode = 409
                 });
             }
             catch (Exception ex)
@@ -649,7 +665,7 @@ namespace TERMS_LOYALTY_API.Controllers
         /// 5 Maintenance.
         /// </summary>
         [HttpGet("prioritytypes")]
-        [ProducesResponseType(typeof(HttpResponseData<PriorityMaster>), 200)]
+        [ProducesResponseType(typeof(HttpResponseData<List<PriorityMaster>>), 200)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 400)]
         [ProducesResponseType(typeof(HttpResponseData<object>), 500)]
         public async Task<IActionResult> GetAllPriority()
@@ -658,12 +674,15 @@ namespace TERMS_LOYALTY_API.Controllers
             {
                 var result = await _queueRepo.GetAllPriorities();
 
-                return Ok(new HttpResponseData<PriorityMaster>
+                // Under "result", like every other list endpoint and like the API
+                // document. It used to go out under "results", which left callers
+                // reading response.result - the web portal included - with nothing.
+                return Ok(new HttpResponseData<List<PriorityMaster>>
                 {
                     Success = true,
                     Message = "Priority Types retrieved successfully",
                     ResponsCode = 200,
-                    Results = result
+                    Result = result
                 });
             }
             catch (Exception ex)

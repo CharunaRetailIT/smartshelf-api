@@ -35,6 +35,16 @@ namespace TERMS_LOYALTY_API.Repository
     }
 
     /// <summary>
+    /// Deactivate was called on a queue that has not run. Nothing is displaying,
+    /// so there is nothing to retire - a state conflict the caller can answer with
+    /// 409 rather than the 500 a bare InvalidOperationException produced.
+    /// </summary>
+    public class QueueNotActivatedException : InvalidOperationException
+    {
+        public QueueNotActivatedException(string message) : base(message) { }
+    }
+
+    /// <summary>
     /// Delete was called on a queue that is still inside its display window and
     /// has not been deactivated.
     /// </summary>
@@ -762,8 +772,12 @@ namespace TERMS_LOYALTY_API.Repository
                 if (queue == null)
                     throw new KeyNotFoundException($"Queue with ID {id} not found");
 
+                // Only a queue that has run has anything to retire. Naming the
+                // status it is actually in beats "not active" - the usual cause
+                // is deactivating a Pending queue that was never activated.
                 if (queue.StatusId != (int)QueueStatus.Completed)
-                    throw new InvalidOperationException("Queue is not active");
+                    throw new QueueNotActivatedException(
+                        $"Queue {id} is {(QueueStatus)queue.StatusId} and has not been activated, so there is nothing to deactivate.");
 
                 // Retire the queue rather than reverting it to Pending. It has
                 // already run, so Completed is the truthful status, and it is
@@ -791,6 +805,13 @@ namespace TERMS_LOYALTY_API.Repository
 
 
                 return await GetQueueByIdAsync(id);
+            }
+            catch (Exception ex) when (ex is KeyNotFoundException || ex is QueueNotActivatedException)
+            {
+                // Rejected by a guard - the caller asked for something the queue's
+                // state does not allow. Not a server fault, so not an error log.
+                _logger.LogInformation("Deactivate rejected for queue {QueueId}: {Reason}", id, ex.Message);
+                throw;
             }
             catch (Exception ex)
             {
