@@ -1,5 +1,4 @@
-﻿using Microsoft.AspNetCore.SignalR;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -15,7 +14,6 @@ using TERMS_LOYALTY_API.Interface;
 using TERMS_LOYALTY_API.Models.shelf;
 using TERMS_LOYALTY_API.Repository;
 using TERMS_LOYALTY_API.Shared.Enum;
-using TERMS_LOYALTY_API.SignalRHubs;
 
 namespace TERMS_LOYALTY_API.Services
 {
@@ -24,13 +22,11 @@ namespace TERMS_LOYALTY_API.Services
         private readonly ILogger<QueueProcessorService> _logger;
         private readonly IServiceProvider _serviceProvider;
         private readonly TimeSpan _interval = TimeSpan.FromSeconds(30); // Check every 30 seconds
-        private readonly IHubContext<DeviceAssignmentHub> _hubContext;
 
-        public QueueProcessorService(ILogger<QueueProcessorService> logger, IServiceProvider serviceProvider, IHubContext<DeviceAssignmentHub> hubContext)
+        public QueueProcessorService(ILogger<QueueProcessorService> logger, IServiceProvider serviceProvider)
         {
             _logger = logger;
             _serviceProvider = serviceProvider;
-            _hubContext = hubContext;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)

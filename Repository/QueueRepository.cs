@@ -1,5 +1,4 @@
-﻿using Microsoft.AspNetCore.SignalR;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -14,23 +13,47 @@ using TERMS_LOYALTY_API.Models.shelf;
 using TERMS_LOYALTY_API.Services;
 using TERMS_LOYALTY_API.Shared.Enum;
 using TERMS_LOYALTY_API.Shared.Helpers;
-using TERMS_LOYALTY_API.SignalRHubs;
 
 namespace TERMS_LOYALTY_API.Repository
 {
+    /// <summary>
+    /// Activate was called on a queue that has already run. Distinct from an
+    /// execution failure so the caller can answer 409 instead of 500, and so the
+    /// queue's real outcome is not overwritten.
+    /// </summary>
+    public class QueueAlreadyActivatedException : InvalidOperationException
+    {
+        public QueueAlreadyActivatedException(string message) : base(message) { }
+    }
+
+    /// <summary>
+    /// Activate was called before the queue's start time.
+    /// </summary>
+    public class QueueNotDueException : InvalidOperationException
+    {
+        public QueueNotDueException(string message) : base(message) { }
+    }
+
+    /// <summary>
+    /// Delete was called on a queue that is still inside its display window and
+    /// has not been deactivated.
+    /// </summary>
+    public class QueueDisplayActiveException : InvalidOperationException
+    {
+        public QueueDisplayActiveException(string message) : base(message) { }
+    }
+
     public class QueueRepository : IQueue
     {
         private readonly SmartShelfDbContext _context;
         private readonly ILogger<QueueRepository> _logger;
         private readonly MinewCloudService _minewService;
-        private readonly IHubContext<DeviceAssignmentHub> _hubContext;
 
-        public QueueRepository(SmartShelfDbContext context, ILogger<QueueRepository> logger, MinewCloudService cloudService, IHubContext<DeviceAssignmentHub> hubContext)
+        public QueueRepository(SmartShelfDbContext context, ILogger<QueueRepository> logger, MinewCloudService cloudService)
         {
             _context = context;
             _logger = logger;
             _minewService = cloudService;
-            _hubContext = hubContext;
         }
 
         //public async Task<PagedResult<QueueDto>> GetQueuesPagedAsync(QueuePagedRequest request)
@@ -608,7 +631,6 @@ namespace TERMS_LOYALTY_API.Repository
                 await _context.SaveChangesAsync();
 
                 // Clear cache or notify if needed
-                await NotifyQueueUpdate(queue);
 
                 return await GetQueueByIdAsync(id);
             }
@@ -628,12 +650,20 @@ namespace TERMS_LOYALTY_API.Repository
                 if (queue == null)
                     return false;
 
-                // Check if queue is currently active
-                if (queue.StatusId == (int)QueueStatus.Completed &&
+                // Block deletion only while the queue is genuinely still driving a
+                // label: inside its display window AND not yet retired.
+                //
+                // IsActive was missing from this test, which made the error's own
+                // advice impossible to follow - DeactivateQueueAsync clears IsActive
+                // but leaves StatusId and the dates alone, so the guard kept firing
+                // and a finished queue could not be deleted through the API at all.
+                if (queue.IsActive &&
+                    queue.StatusId == (int)QueueStatus.Completed &&
                     queue.StartDate <= DateTime.UtcNow &&
                     (queue.EndDate == null || queue.EndDate > DateTime.UtcNow))
                 {
-                    throw new InvalidOperationException("Cannot delete an active queue. Deactivate it first.");
+                    throw new QueueDisplayActiveException(
+                        $"Queue {id} is still displaying on its label. Deactivate it first, then delete.");
                 }
 
                 // Deactivate any active display
@@ -645,8 +675,6 @@ namespace TERMS_LOYALTY_API.Repository
                 _context.QueueMaster.Remove(queue);
                 await _context.SaveChangesAsync();
 
-                // Notify removal
-                await NotifyQueueRemoval(queue);
 
                 return true;
             }
@@ -659,6 +687,14 @@ namespace TERMS_LOYALTY_API.Repository
 
         public async Task<QueueDto> ActivateQueueAsync(long id)
         {
+            // Distinguishes "we never got as far as running it" from "the run failed".
+            // The guards below and the execution itself both throw
+            // InvalidOperationException, so the exception type alone cannot tell them
+            // apart - and marking a guard rejection as Failed used to overwrite the
+            // status of a queue the background processor had *successfully* run seconds
+            // earlier, storing a good run as a failure.
+            var executionStarted = false;
+
             try
             {
                 var queue = await _context.QueueMaster
@@ -669,10 +705,10 @@ namespace TERMS_LOYALTY_API.Repository
                     throw new KeyNotFoundException($"Queue with ID {id} not found");
 
                 if (queue.StatusId == (int)QueueStatus.Completed)
-                    throw new InvalidOperationException("Queue is already active");
+                    throw new QueueAlreadyActivatedException($"Queue {id} has already been activated.");
 
                 if (queue.StartDate > DateTime.UtcNow)
-                    throw new InvalidOperationException("Queue start time is in the future");
+                    throw new QueueNotDueException($"Queue {id} starts at {queue.StartDate:u} and is not due yet.");
 
                 // Update status
                 queue.StatusId = (int)QueueStatus.Completed;
@@ -680,20 +716,27 @@ namespace TERMS_LOYALTY_API.Repository
                 queue.LastAttempt = DateTime.UtcNow;
 
                 // Execute the queue based on type
+                executionStarted = true;
                 await ExecuteQueueContent(queue);
 
                 await _context.SaveChangesAsync();
 
-                // Notify activation
-                await NotifyQueueActivation(queue);
 
                 return await GetQueueByIdAsync(id);
+            }
+            catch (Exception ex) when (!executionStarted)
+            {
+                // Rejected by a guard before anything was attempted - not found, already
+                // activated, or not due. Nothing ran, so nothing is recorded against the
+                // queue; the row keeps whatever status its real run left it with.
+                _logger.LogInformation("Activate rejected for queue {QueueId}: {Reason}", id, ex.Message);
+                throw;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error activating queue ID: {id}");
 
-                // Update queue as failed
+                // A genuine execution failure - the bind was attempted and did not work.
                 var queue = await _context.QueueMaster.FindAsync(id);
                 if (queue != null)
                 {
@@ -746,8 +789,6 @@ namespace TERMS_LOYALTY_API.Repository
 
                 await _context.SaveChangesAsync();
 
-                // Notify deactivation
-                await NotifyQueueDeactivation(queue);
 
                 return await GetQueueByIdAsync(id);
             }
@@ -782,7 +823,13 @@ namespace TERMS_LOYALTY_API.Repository
                         DeviceName = q.Device.Name,
                         DeviceType = q.Device.DeviceType,
                         LocationType = q.LocationType,
-                        LocationName = GetLocationName(q.LocationType, q.LocationId, q.ProductId, q.ShelfId),
+                        // LocationName is resolved after materialisation - see
+                        // PopulateLocationNamesAsync. Calling GetLocationName here made
+                        // EF Core try to translate an instance method that itself queries
+                        // the context, which it cannot do: every one of these endpoints
+                        // returned 500.
+                        ProductId = q.ProductId,
+                        ShelfId = q.ShelfId,
                         StartDate = q.StartDate,
                         EndDate = q.EndDate,
                         Status = q.Status != null ? q.Status.Name : "Unknown",
@@ -792,6 +839,8 @@ namespace TERMS_LOYALTY_API.Repository
                         StoreName = q.Store.StoreName
                     })
                     .ToListAsync();
+
+                await PopulateLocationNamesAsync(queues);
 
                 return queues;
             }
@@ -825,7 +874,13 @@ namespace TERMS_LOYALTY_API.Repository
                         DeviceName = q.Device.Name,
                         DeviceType = q.Device.DeviceType,
                         LocationType = q.LocationType,
-                        LocationName = GetLocationName(q.LocationType, q.LocationId, q.ProductId, q.ShelfId),
+                        // LocationName is resolved after materialisation - see
+                        // PopulateLocationNamesAsync. Calling GetLocationName here made
+                        // EF Core try to translate an instance method that itself queries
+                        // the context, which it cannot do: every one of these endpoints
+                        // returned 500.
+                        ProductId = q.ProductId,
+                        ShelfId = q.ShelfId,
                         StartDate = q.StartDate,
                         EndDate = q.EndDate,
                         Status = q.Status != null ? q.Status.Name : "Unknown",
@@ -835,6 +890,8 @@ namespace TERMS_LOYALTY_API.Repository
                         StoreName = q.Store.StoreName
                     })
                     .ToListAsync();
+
+                await PopulateLocationNamesAsync(queues);
 
                 return queues;
             }
@@ -864,7 +921,13 @@ namespace TERMS_LOYALTY_API.Repository
                         DeviceName = q.Device.Name,
                         DeviceType = q.Device.DeviceType,
                         LocationType = q.LocationType,
-                        LocationName = GetLocationName(q.LocationType, q.LocationId, q.ProductId, q.ShelfId),
+                        // LocationName is resolved after materialisation - see
+                        // PopulateLocationNamesAsync. Calling GetLocationName here made
+                        // EF Core try to translate an instance method that itself queries
+                        // the context, which it cannot do: every one of these endpoints
+                        // returned 500.
+                        ProductId = q.ProductId,
+                        ShelfId = q.ShelfId,
                         StartDate = q.StartDate,
                         EndDate = q.EndDate,
                         Status = q.Status != null ? q.Status.Name : "Unknown",
@@ -874,6 +937,8 @@ namespace TERMS_LOYALTY_API.Repository
                         StoreName = q.Store.StoreName
                     })
                     .ToListAsync();
+
+                await PopulateLocationNamesAsync(queues);
 
                 return queues;
             }
@@ -903,7 +968,13 @@ namespace TERMS_LOYALTY_API.Repository
                         DeviceName = q.Device.Name,
                         DeviceType = q.Device.DeviceType,
                         LocationType = q.LocationType,
-                        LocationName = GetLocationName(q.LocationType, q.LocationId, q.ProductId, q.ShelfId),
+                        // LocationName is resolved after materialisation - see
+                        // PopulateLocationNamesAsync. Calling GetLocationName here made
+                        // EF Core try to translate an instance method that itself queries
+                        // the context, which it cannot do: every one of these endpoints
+                        // returned 500.
+                        ProductId = q.ProductId,
+                        ShelfId = q.ShelfId,
                         StartDate = q.StartDate,
                         EndDate = q.EndDate,
                         Status = q.Status != null ? q.Status.Name : "Unknown",
@@ -913,6 +984,8 @@ namespace TERMS_LOYALTY_API.Repository
                         StoreName = q.Store.StoreName
                     })
                     .ToListAsync();
+
+                await PopulateLocationNamesAsync(queues);
 
                 return queues;
             }
@@ -1244,45 +1317,22 @@ namespace TERMS_LOYALTY_API.Repository
             }
         }
 
-        private async Task ExecuteStandardQueue(QueueMaster queue)
+        /// <summary>
+        /// "Standard" (non-Minew) screens were driven entirely by a SignalR
+        /// broadcast that a browser-based display client listened for. With SignalR
+        /// removed there is no transport left to reach them, so a queue targeting
+        /// one cannot run.
+        ///
+        /// This throws rather than returning quietly: the caller records the queue
+        /// as Failed with this message, which is the truth. Silently succeeding
+        /// would leave an operator waiting for a screen that is never going to
+        /// change.
+        /// </summary>
+        private Task ExecuteStandardQueue(QueueMaster queue)
         {
-            if (!queue.MessageId.HasValue)
-                throw new InvalidOperationException("Message ID is required for Standard queue");
-
-            var message = await _context.MessageMaster.FindAsync(queue.MessageId.Value);
-            if (message == null)
-                throw new InvalidOperationException("Message not found");
-
-            var device = queue.Device;
-
-            // Notify via SignalR. SignalR group names are case-sensitive and
-            // DeviceAssignmentHub.JoinDeviceGroup lower-cases the device type,
-            // so the sender has to lower-case it too - otherwise this went to
-            // "assignments-Standard-2" while the clients sat in
-            // "assignments-standard-2" and no device ever saw the queue.
-            var groupName = DeviceAssignmentHub.GetGroupName(device.DeviceType, device.StoreId);
-
-            await _hubContext.Clients.Group(groupName).SendAsync("QueueActivated", new
-            {
-                QueueId = queue.Id,
-                DeviceId = device.Id,
-                DeviceName = device.Name,
-                Message = new
-                {
-                    message.Id,
-                    message.Title,
-                    message.ContentType,
-                    message.ContentData,
-                    message.FileUrl,
-                    message.Duration
-                },
-                LocationType = queue.LocationType,
-                LocationId = queue.LocationId,
-                StartDate = queue.StartDate,
-                EndDate = queue.EndDate
-            });
-
-            queue.LastAttempt = DateTime.UtcNow;
+            throw new InvalidOperationException(
+                $"Device '{queue.Device?.Name}' is a Standard device. Only Minew ESL devices are " +
+                "supported - scheduling for Standard screens was removed with the real-time display feed.");
         }
 
         private async Task DeactivateQueueDisplay(QueueMaster queue)
@@ -1299,13 +1349,9 @@ namespace TERMS_LOYALTY_API.Repository
                         break;
 
                     case "Standard":
-                        // Notify via SignalR to clear display
-                        var groupName = DeviceAssignmentHub.GetGroupName(queue.Device.DeviceType, queue.Device.StoreId);
-                        await _hubContext.Clients.Group(groupName).SendAsync("QueueDeactivated", new
-                        {
-                            QueueId = queue.Id,
-                            DeviceId = queue.Device.Id
-                        });
+                        // Nothing to clear: a Standard device could only ever have been
+                        // driven by the real-time feed, which no longer exists, so no
+                        // queue can have put anything on its screen in the first place.
                         break;
                 }
             }
@@ -1434,75 +1480,9 @@ namespace TERMS_LOYALTY_API.Repository
             return null;
         }
 
-        private async Task NotifyQueueUpdate(QueueMaster queue)
-        {
-            try
-            {
-                var groupName = $"queues-updates-{queue.StoreId}";
-                await _hubContext.Clients.Group(groupName).SendAsync("QueueUpdated", new
-                {
-                    QueueId = queue.Id,
-                    Status = ((QueueStatus)queue.StatusId).ToString(),
-                    IsActive = queue.IsActive,
-                    UpdatedDate = queue.UpdatedDate
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error notifying queue update: {queue.Id}");
-            }
-        }
 
-        private async Task NotifyQueueActivation(QueueMaster queue)
-        {
-            try
-            {
-                var groupName = $"queues-updates-{queue.StoreId}";
-                await _hubContext.Clients.Group(groupName).SendAsync("QueueActivated", new
-                {
-                    QueueId = queue.Id,
-                    DeviceId = queue.DeviceId,
-                    StartDate = queue.StartDate
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error notifying queue activation: {queue.Id}");
-            }
-        }
 
-        private async Task NotifyQueueDeactivation(QueueMaster queue)
-        {
-            try
-            {
-                var groupName = $"queues-updates-{queue.StoreId}";
-                await _hubContext.Clients.Group(groupName).SendAsync("QueueDeactivated", new
-                {
-                    QueueId = queue.Id,
-                    DeviceId = queue.DeviceId
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error notifying queue deactivation: {queue.Id}");
-            }
-        }
 
-        private async Task NotifyQueueRemoval(QueueMaster queue)
-        {
-            try
-            {
-                var groupName = $"queues-updates-{queue.StoreId}";
-                await _hubContext.Clients.Group(groupName).SendAsync("QueueDeleted", new
-                {
-                    QueueId = queue.Id
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error notifying queue removal: {queue.Id}");
-            }
-        }
 
         private Dictionary<string, string> GenerateGoodsMapFromProduct(ProductMaster product)
         {
@@ -1596,6 +1576,70 @@ namespace TERMS_LOYALTY_API.Repository
 
                 default:
                     return "Unknown Location";
+            }
+        }
+
+        /// <summary>
+        /// Fills in LocationName (and the product/shelf name) on already-materialised
+        /// rows. This runs after the query rather than inside the projection because
+        /// GetLocationName queries the context itself, which EF Core cannot translate -
+        /// every list endpoint that projected through it returned 500.
+        ///
+        /// Two batched lookups rather than one Find per row, so a 100-row page costs
+        /// two extra round trips instead of a hundred.
+        /// </summary>
+        private async Task PopulateLocationNamesAsync(List<QueueDto> queues)
+        {
+            if (queues == null || queues.Count == 0)
+                return;
+
+            var productIds = queues
+                .Where(q => q.ProductId.HasValue)
+                .Select(q => q.ProductId.Value)
+                .Distinct()
+                .ToList();
+
+            var shelfIds = queues
+                .Where(q => q.ShelfId.HasValue)
+                .Select(q => q.ShelfId.Value)
+                .Distinct()
+                .ToList();
+
+            var productNames = productIds.Count == 0
+                ? new Dictionary<long, string>()
+                : await _context.ProductMaster
+                    .Where(p => productIds.Contains(p.Id))
+                    .ToDictionaryAsync(p => p.Id, p => p.ProductName);
+
+            var shelfNames = shelfIds.Count == 0
+                ? new Dictionary<long, string>()
+                : await _context.ShelfMaster
+                    .Where(s => shelfIds.Contains(s.Id))
+                    .ToDictionaryAsync(s => s.Id, s => s.Name);
+
+            foreach (var queue in queues)
+            {
+                // Queues created from an assignment carry the assignment's own casing
+                // ("Product"), so compare case-insensitively - the same trap that once
+                // made ResolveQueueGoodsMap skip real data.
+                var locationType = queue.LocationType?.Trim().ToUpperInvariant();
+
+                if (locationType == "PRODUCT" && queue.ProductId.HasValue)
+                {
+                    productNames.TryGetValue(queue.ProductId.Value, out var name);
+                    queue.ProductName = name;
+                    queue.LocationName = name ?? "Unknown Product";
+                }
+                else if (locationType == "SHELF" && queue.ShelfId.HasValue)
+                {
+                    shelfNames.TryGetValue(queue.ShelfId.Value, out var name);
+                    queue.ShelfName = name;
+                    queue.LocationName = name ?? "Unknown Shelf";
+                }
+                else
+                {
+                    queue.LocationName = "Unknown Location";
+                }
             }
         }
 

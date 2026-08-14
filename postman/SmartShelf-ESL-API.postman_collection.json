@@ -1,0 +1,1102 @@
+{
+  "info": {
+    "_postman_id": "b1f4a2c0-7d3e-4a91-9c15-smartshelf0001",
+    "name": "SmartShelf ESL API (Minew)",
+    "description": "Product and ESL integration API for SmartShelf.\n\n## Getting started\n1. Select the **SmartShelf ESL** environment and set `baseUrl`, `userName`, `password`.\n2. Run **Auth > Login**. The token is captured into `{{token}}` automatically and every other request uses it.\n3. Set `storeId` in the environment - every product operation is scoped to one store.\n\n## Notes\n- All prices reach the ESL labels as part of the create/update call. There is **no separate push or sync endpoint to fire**.\n- A label only repaints if it is bound to the product with a template, and the store must have a `MinewStoreId`.\n- **Scheduling** times are UTC (Sri Lanka is UTC+5:30). The create requests fill them in for you.\n- Bulk endpoints are **partial-success**: a bad row is reported with a reason and the rest of the batch still lands. Check `result.results[]` per row, not just the HTTP status.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://esl-api.retailit.lk"
+    },
+    {
+      "key": "storeId",
+      "value": "3"
+    },
+    {
+      "key": "userId",
+      "value": "0"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Login succeeded', () => pm.expect(body.success).to.be.true);",
+                  "if (body.success && body.result && body.result.token) {",
+                  "    pm.environment.set('token', body.result.token);",
+                  "    if (body.result.user && body.result.user.storeId) {",
+                  "        pm.environment.set('storeId', String(body.result.user.storeId));",
+                  "    }",
+                  "    if (body.result.user && body.result.user.id) {",
+                  "        pm.environment.set('userId', String(body.result.user.id));",
+                  "    }",
+                  "    console.log('Token saved. storeId =', pm.environment.get('storeId'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userName\": \"{{userName}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Logs in with the employee ID and password. Saves `token`, `storeId` and `userId` into the environment for every other request in this collection.\n\n`userName` is the **Employee ID**, not the email address."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reference data",
+      "description": "Read-only lookups used to build product and ESL payloads.",
+      "item": [
+        {
+          "name": "Categories (store-wise)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/all-categories?storeId={{storeId}}&pageNumber=1&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "all-categories"
+              ],
+              "query": [
+                {
+                  "key": "storeId",
+                  "value": "{{storeId}}"
+                },
+                {
+                  "key": "pageNumber",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Category ids and names for the store. Bulk payloads may reference a category either by `categoryId` or by `categoryName`."
+          }
+        },
+        {
+          "name": "Sub-categories (store-wise)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/active-subcategories?storeId={{storeId}}&pageNumber=1&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "active-subcategories"
+              ],
+              "query": [
+                {
+                  "key": "storeId",
+                  "value": "{{storeId}}"
+                },
+                {
+                  "key": "pageNumber",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Devices (local list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/devices/local",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "device",
+                "devices",
+                "local"
+              ]
+            },
+            "description": "All active ESL devices. Use the `id` values here as `deviceId` inside `eslAssignments`."
+          }
+        },
+        {
+          "name": "Templates (local list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/template/local",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "device",
+                "template",
+                "local"
+              ]
+            },
+            "description": "Minew label templates synced into SmartShelf. Use the `id` values here as `templateId` inside `eslAssignments`.\n\nTemplate ids are long numeric **strings** - keep them quoted in JSON."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "Create product (no ESL)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Created', () => pm.expect(body.success).to.be.true);",
+                  "if (body.result && body.result.id) { pm.environment.set('lastProductId', body.result.id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productCode\": \"PRD-9001\",\n  \"barCode\": \"4791234599001\",\n  \"productName\": \"Sample Product Without ESL\",\n  \"categoryId\": 3,\n  \"subCategoryId\": 0,\n  \"quantity\": 50,\n  \"unitOfMeasure\": \"Pack\",\n  \"costPrice\": 500,\n  \"sellingPrice\": 750,\n  \"discountPrice\": 50,\n  \"discountPercentage\": 0,\n  \"wholesalePrice\": 650,\n  \"minimumPrice\": 600,\n  \"maximumPrice\": 900,\n  \"description\": \"Created via Postman\",\n  \"isActive\": true,\n  \"createdUser\": {{userId}},\n  \"storeId\": {{storeId}}\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/product",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "product"
+              ]
+            },
+            "description": "Creates a product with no label attached. Send `subCategoryId: 0` when the product has no sub-category.\n\nRoles: Admin, Manager, Operator."
+          }
+        },
+        {
+          "name": "Create product WITH ESL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Created', () => pm.expect(body.success).to.be.true);",
+                  "if (body.result && body.result.id) { pm.environment.set('lastProductId', body.result.id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": {\n    \"productCode\": \"PRD-9002\",\n    \"barCode\": \"4791234599002\",\n    \"productName\": \"Sample Product With ESL\",\n    \"categoryId\": 3,\n    \"subCategoryId\": null,\n    \"quantity\": 40,\n    \"unitOfMeasure\": \"Pack\",\n    \"costPrice\": 800,\n    \"sellingPrice\": 1100,\n    \"discountPrice\": 100,\n    \"discountedPrice\": 1000,\n    \"discountPercentage\": 9,\n    \"wholesalePrice\": 950,\n    \"minimumPrice\": 900,\n    \"maximumPrice\": 1300,\n    \"description\": \"Created with an ESL binding\",\n    \"isActive\": true,\n    \"storeId\": {{storeId}}\n  },\n  \"eslAssignments\": [\n    {\n      \"deviceId\": 10,\n      \"templateId\": \"2087930462289793024\",\n      \"messageId\": null,\n      \"displayOrder\": 1,\n      \"isActive\": true\n    }\n  ],\n  \"userId\": {{userId}}\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/with-esl",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "with-esl"
+              ]
+            },
+            "description": "Creates the product **and** its label bindings in one database transaction - if any binding is invalid nothing is saved, so a product can never end up half-configured.\n\nThe price is pushed to the label as part of this call.\n\n`eslAssignments` is optional; send `[]` to create without a label.\n\nGet `deviceId` from **Reference data > Devices**, `templateId` from **Reference data > Templates**.\n\n**The template must belong to the same Minew store as the device, and match its screen size.** A template id from another store is accepted locally and then rejected by the cloud with `模板不存在` (\"template does not exist\"). Pull the id from **Reference data > Templates** and check its `storeId` and `screenInch` against the device.\n\n**This one call now puts the product on the label.** The ESL assignment is saved *and* bound in the vendor cloud, so the label starts displaying immediately - there is no separate bind call. Set `\"bindToEsl\": false` to record the assignment locally only.\n\nThe response message reports the outcome, e.g. `\"...created successfully. 1 label(s) bound.\"`"
+          }
+        },
+        {
+          "name": "Update product (no ESL)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productCode\": \"PRD-9001\",\n  \"barCode\": \"4791234599001\",\n  \"productName\": \"Sample Product Without ESL\",\n  \"categoryId\": 3,\n  \"subCategoryId\": 0,\n  \"quantity\": 45,\n  \"unitOfMeasure\": \"Pack\",\n  \"costPrice\": 500,\n  \"sellingPrice\": 799,\n  \"discountPrice\": 25,\n  \"discountedPrice\": 774,\n  \"discountPercentage\": 3,\n  \"wholesalePrice\": 650,\n  \"minimumPrice\": 600,\n  \"maximumPrice\": 900,\n  \"description\": \"Updated via Postman\",\n  \"isActive\": true,\n  \"updatedUser\": {{userId}},\n  \"storeId\": {{storeId}}\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/product/{{lastProductId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "product",
+                "{{lastProductId}}"
+              ]
+            },
+            "description": "Full replace of the product fields, then pushes the new price to the label.\n\nThis endpoint expects the **whole** product - omitted fields are overwritten. For a price-only feed use **Bulk update**, which only touches the fields you send."
+          }
+        },
+        {
+          "name": "Update product WITH ESL",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": {\n    \"productCode\": \"PRD-9002\",\n    \"barCode\": \"4791234599002\",\n    \"productName\": \"Sample Product With ESL\",\n    \"categoryId\": 3,\n    \"subCategoryId\": null,\n    \"quantity\": 38,\n    \"unitOfMeasure\": \"Pack\",\n    \"costPrice\": 800,\n    \"sellingPrice\": 1199.5,\n    \"discountPrice\": 99.5,\n    \"discountedPrice\": 1100,\n    \"discountPercentage\": 8,\n    \"wholesalePrice\": 950,\n    \"minimumPrice\": 900,\n    \"maximumPrice\": 1300,\n    \"description\": \"Price changed via Postman\",\n    \"isActive\": true,\n    \"storeId\": {{storeId}}\n  },\n  \"eslAssignments\": [\n    {\n      \"deviceId\": 10,\n      \"templateId\": \"2087930462289793024\",\n      \"messageId\": null,\n      \"templateAssignmentId\": null,\n      \"displayOrder\": 1,\n      \"isActive\": true,\n      \"isDeleted\": false\n    }\n  ],\n  \"userId\": {{userId}}\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{lastProductId}}/with-esl",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{lastProductId}}",
+                "with-esl"
+              ]
+            },
+            "description": "Updates the product and reconciles its label bindings in one transaction.\n\nTo **remove** an existing binding, send that row with `\"isDeleted\": true` and its saved `templateAssignmentId` / `messageAssignmentId` (both come back from the lookup endpoints).\n\n**The template must belong to the same Minew store as the device, and match its screen size.** A template id from another store is accepted locally and then rejected by the cloud with `模板不存在` (\"template does not exist\"). Pull the id from **Reference data > Templates** and check its `storeId` and `screenInch` against the device.\n\n**This one call now puts the product on the label.** The ESL assignment is saved *and* bound in the vendor cloud, so the label starts displaying immediately - there is no separate bind call. Set `\"bindToEsl\": false` to record the assignment locally only.\n\nThe response message reports the outcome, e.g. `\"...created successfully. 1 label(s) bound.\"`"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Product lookup",
+      "item": [
+        {
+          "name": "Get all products (store-wise, paged)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products?storeId={{storeId}}&pageNumber=1&pageSize=20&searchTerm=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "storeId",
+                  "value": "{{storeId}}"
+                },
+                {
+                  "key": "pageNumber",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "categoryId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "subcategoryId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "searchTerm",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Paged product list for one store. Returns product fields only (no ESL data) - it is the grid/list feed.\n\nFor ESL data use **Get product by code** or **Get product details by id**.\n\nReturns HTTP 404 with `totalCount: 0` when nothing matches."
+          }
+        },
+        {
+          "name": "Get product by CODE (with ESL data)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Found', () => pm.expect(body.success).to.be.true);",
+                  "pm.test('ESL block present', () => pm.expect(body.result).to.have.property('eslDevices'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/by-code/PRD-1001?storeId={{storeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "by-code",
+                "PRD-1001"
+              ],
+              "query": [
+                {
+                  "key": "storeId",
+                  "value": "{{storeId}}"
+                }
+              ]
+            },
+            "description": "**Whole product record for a product code, including every ESL bound to it.**\n\n`storeId` is required - product codes are unique per store, not globally.\n\nResponse highlights:\n- `hasEsl` - true when at least one label is bound, so you can branch without inspecting the array\n- `eslDevices[]` - one entry per label, with `deviceId`, `mac`, `templateId`/`templateName`, `messageId`/`messageName`, battery and online state\n\nA label bound with both a template and a message appears **once** with both sets of fields populated.\n\nReturns 404 when the code does not exist in that store."
+          }
+        },
+        {
+          "name": "Get product details by id (with ESL data)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{lastProductId}}/details?storeId={{storeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{lastProductId}}",
+                "details"
+              ],
+              "query": [
+                {
+                  "key": "storeId",
+                  "value": "{{storeId}}"
+                }
+              ]
+            },
+            "description": "Identical payload to **Get product by code**, keyed on the internal product id."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bulk operations",
+      "description": "JSON bulk load. Partial success: one bad row does not abort the batch.",
+      "item": [
+        {
+          "name": "Bulk CREATE products (JSON)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const r = body.result;",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "console.log(`rows=${r.totalRows} ok=${r.succeeded} failed=${r.failed}`);",
+                  "r.results.filter(x => !x.success).forEach(x => console.log(`row ${x.index} (${x.productCode}): ${x.message}`));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeId\": {{storeId}},\n  \"userId\": {{userId}},\n  \"pushToEsl\": true,\n  \"bindToEsl\": true,\n  \"products\": [\n    {\n      \"productCode\": \"BULK-0001\",\n      \"barCode\": \"4791234510001\",\n      \"productName\": \"Bulk Item One\",\n      \"categoryName\": \"Beverages\",\n      \"quantity\": 100,\n      \"unitOfMeasure\": \"Pack\",\n      \"costPrice\": 300,\n      \"sellingPrice\": 450,\n      \"discountPrice\": 25,\n      \"discountedPrice\": 425,\n      \"discountPercentage\": 5,\n      \"wholesalePrice\": 400,\n      \"minimumPrice\": 380,\n      \"maximumPrice\": 500,\n      \"description\": \"Loaded in bulk\",\n      \"isActive\": true\n    },\n    {\n      \"productCode\": \"BULK-0002\",\n      \"productName\": \"Bulk Item Two (with ESL)\",\n      \"categoryId\": 3,\n      \"quantity\": 60,\n      \"sellingPrice\": 890,\n      \"discountPrice\": 40,\n      \"isActive\": true,\n      \"eslAssignments\": [\n        {\n          \"deviceId\": 10,\n          \"templateId\": \"2087930462289793024\",\n          \"displayOrder\": 1,\n          \"isActive\": true\n        }\n      ]\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "bulk"
+              ]
+            },
+            "description": "Creates many products from one JSON payload, optionally with their ESL bindings, and pushes the prices to the labels in the same call.\n\n**Category may be given by id or by name.** `categoryName` exists so an external POS/ERP does not need to know SmartShelf's internal ids. `categoryId` wins if both are sent.\n\n**Partial success.** HTTP is 200 even when some rows fail. Read `result.results[]`:\n\n| field | meaning |\n|---|---|\n| `index` | position in the payload you sent |\n| `success` | did the row save |\n| `productId` | new id when it did |\n| `message` | reason when it did not |\n| `eslPushed` | `true`/`false`, or `null` when no push was attempted |\n| `eslMessage` | what the label push returned |\n\nSet `\"pushToEsl\": false` for a data-only load (migration, seeding) with no cloud traffic.\n\nA failing row rolls back only itself.\n\n**The template must belong to the same Minew store as the device, and match its screen size.** A template id from another store is accepted locally and then rejected by the cloud with `模板不存在` (\"template does not exist\"). Pull the id from **Reference data > Templates** and check its `storeId` and `screenInch` against the device."
+          }
+        },
+        {
+          "name": "Bulk UPDATE products + ESL prices (JSON)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const r = body.result;",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "console.log(r.eslSummary);",
+                  "r.results.filter(x => !x.success).forEach(x => console.log(`row ${x.index} (${x.productCode}): ${x.message}`));",
+                  "r.results.filter(x => x.eslPushed === false).forEach(x => console.log(`ESL not pushed for ${x.productCode}: ${x.eslMessage}`));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeId\": {{storeId}},\n  \"userId\": {{userId}},\n  \"pushToEsl\": true,\n  \"products\": [\n    {\n      \"productCode\": \"BULK-0001\",\n      \"sellingPrice\": 475,\n      \"discountPrice\": 30\n    },\n    {\n      \"productCode\": \"BULK-0002\",\n      \"sellingPrice\": 925\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "bulk"
+              ]
+            },
+            "description": "**The price-feed endpoint.** Updates many products from one JSON payload and pushes every new price to its label in the same call - there is no second endpoint to fire.\n\n**Rows are matched on `productCode` within `storeId`.** Send `id` instead if you prefer to match on the internal id.\n\n**Only the fields you send are changed.** Every field is optional, so a price-only feed like the example will not blank descriptions, barcodes or categories. This is the difference from `PUT /api/products/product/{id}`, which replaces the whole record.\n\nPartial success, same `result.results[]` shape as bulk create. `result.eslSummary` gives the one-line outcome.\n\n**When a price will not reach a label:**\n1. the store has no `MinewStoreId` - reported as `\"Store has no MinewStoreId - saved to database only.\"`\n2. no label is bound to that product with a template - the push succeeds but nothing repaints"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scheduling (queues)",
+      "description": "Scheduled label updates. A queue is a device + a template + a product, with a start and end time.\n\n**The price is read when the queue fires, not when you create it.** Schedule a promo window today and the label picks up whatever the selling price is at that moment - you do not bake the price into the schedule.\n\n**Times are UTC.** The processor compares against `DateTime.UtcNow`, so a 3:00pm Sri Lanka promo is `09:30` UTC. The two create requests below fill `startDate` / `endDate` automatically via a pre-request script, so they just work; copy that script if you build your own.\n\n**Timing:** the processor polls every 30 seconds and activates at most 20 queues per cycle. Fine for promotions, not for second-accurate work.",
+      "item": [
+        {
+          "name": "Schedule a price change",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/direct",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "direct"
+              ]
+            },
+            "description": "**The headline scheduling call.** Binds a product to a label at `startDate` and reverts at `endDate`.\n\n`startDate` and `endDate` are filled in by the pre-request script as UTC, starting 2 minutes from now - run it, then watch the label change.\n\n| Field | | Notes |\n|---|---|---|\n| `deviceId` | required | From **Reference data > Devices** |\n| `templateId` | required for Minew | Quoted string. Minew queues always need one, even when the point is the message |\n| `messageId` | optional | Rides alongside the template; its image goes to the label |\n| `locationType` | required | `PRODUCT` or `SHELF` |\n| `locationId` | required | The product id when `locationType` is `PRODUCT` |\n| `startDate` | required | **UTC**, `yyyy-MM-ddTHH:mm:ss` |\n| `endDate` | optional | Set it - the overlap check below cannot compare against an open-ended queue |\n| `priorityId` | optional | See **Priority types**. Defaults to `4` (Scheduled); use `2` for a price change |\n| `isRecurring` / `recurrencePattern` | optional | `DAILY`, `WEEKLY`, `MONTHLY`, `HOURLY` |\n\n`storeId` is not sent - it is taken from the device.\n\nReturns **409 Conflict** when an unfinished queue already targets the same device and template over an overlapping window.\n\n**The template must belong to the same Minew store as the device, and match its screen size.** A template id from another store is accepted locally and then rejected by the cloud with `模板不存在` (\"template does not exist\"). Pull the id from **Reference data > Templates** and check its `storeId` and `screenInch` against the device.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": 10,\n  \"templateId\": \"2087930462289793024\",\n  \"messageId\": null,\n  \"locationType\": \"PRODUCT\",\n  \"locationId\": 6,\n  \"startDate\": \"{{scheduleStart}}\",\n  \"endDate\": \"{{scheduleEnd}}\",\n  \"priorityId\": 2,\n  \"isRecurring\": false,\n  \"recurrencePattern\": null,\n  \"userId\": 42,\n  \"queueType\": \"TEMPLATE_QUEUE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The scheduler compares against DateTime.UtcNow, so startDate/endDate must be UTC.",
+                  "// Sri Lanka is UTC+5:30 - a local 3:00pm promo is 09:30 UTC.",
+                  "// These build a window starting 2 minutes from now so the sample fires while you watch.",
+                  "const now = new Date();",
+                  "const start = new Date(now.getTime() + 2 * 60 * 1000);",
+                  "const end   = new Date(now.getTime() + 60 * 60 * 1000);",
+                  "pm.environment.set('scheduleStart', start.toISOString().slice(0, 19));",
+                  "pm.environment.set('scheduleEnd',   end.toISOString().slice(0, 19));",
+                  "console.log('Scheduled window (UTC):', pm.environment.get('scheduleStart'), '->', pm.environment.get('scheduleEnd'));",
+                  "console.log('That is', start.toLocaleString(), '->', end.toLocaleString(), 'in your local time.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Queue created', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "if (body.result && body.result.id) {",
+                  "    pm.environment.set('lastQueueId', body.result.id);",
+                  "    console.log('Queue', body.result.id, 'will fire at', pm.environment.get('scheduleStart'), 'UTC');",
+                  "}",
+                  "if (pm.response.code === 409) { console.log('Conflict:', body.message); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Schedule a recurring daily promotion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/direct",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "direct"
+              ]
+            },
+            "description": "Same endpoint, with recurrence. The queue re-arms after each run according to `recurrencePattern`.\n\nBecause the price is resolved at execution time, a daily recurring queue keeps showing the current price without being touched again.\n\n**The template must belong to the same Minew store as the device, and match its screen size.** A template id from another store is accepted locally and then rejected by the cloud with `模板不存在` (\"template does not exist\"). Pull the id from **Reference data > Templates** and check its `storeId` and `screenInch` against the device.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": 10,\n  \"templateId\": \"2087930462289793024\",\n  \"locationType\": \"PRODUCT\",\n  \"locationId\": 6,\n  \"startDate\": \"{{scheduleStart}}\",\n  \"endDate\": \"{{scheduleEnd}}\",\n  \"priorityId\": 3,\n  \"isRecurring\": true,\n  \"recurrencePattern\": \"DAILY\",\n  \"userId\": 42,\n  \"queueType\": \"TEMPLATE_QUEUE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The scheduler compares against DateTime.UtcNow, so startDate/endDate must be UTC.",
+                  "// Sri Lanka is UTC+5:30 - a local 3:00pm promo is 09:30 UTC.",
+                  "// These build a window starting 2 minutes from now so the sample fires while you watch.",
+                  "const now = new Date();",
+                  "const start = new Date(now.getTime() + 2 * 60 * 1000);",
+                  "const end   = new Date(now.getTime() + 60 * 60 * 1000);",
+                  "pm.environment.set('scheduleStart', start.toISOString().slice(0, 19));",
+                  "pm.environment.set('scheduleEnd',   end.toISOString().slice(0, 19));",
+                  "console.log('Scheduled window (UTC):', pm.environment.get('scheduleStart'), '->', pm.environment.get('scheduleEnd'));",
+                  "console.log('That is', start.toLocaleString(), '->', end.toLocaleString(), 'in your local time.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Schedule from an existing binding",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/from-assignment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "from-assignment"
+              ]
+            },
+            "description": "Schedules a label that is **already bound**, so you do not repeat the device, template and product.\n\n`assignmentId` is the `templateAssignmentId` (or `messageAssignmentId`) returned by **Product lookup > Get product by code**.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assignmentId\": 9,\n  \"startDate\": \"{{scheduleStart}}\",\n  \"endDate\": \"{{scheduleEnd}}\",\n  \"priorityId\": 2,\n  \"displayOrder\": 1,\n  \"isRecurring\": false,\n  \"recurrencePattern\": null,\n  \"userId\": 42\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The scheduler compares against DateTime.UtcNow, so startDate/endDate must be UTC.",
+                  "// Sri Lanka is UTC+5:30 - a local 3:00pm promo is 09:30 UTC.",
+                  "// These build a window starting 2 minutes from now so the sample fires while you watch.",
+                  "const now = new Date();",
+                  "const start = new Date(now.getTime() + 2 * 60 * 1000);",
+                  "const end   = new Date(now.getTime() + 60 * 60 * 1000);",
+                  "pm.environment.set('scheduleStart', start.toISOString().slice(0, 19));",
+                  "pm.environment.set('scheduleEnd',   end.toISOString().slice(0, 19));",
+                  "console.log('Scheduled window (UTC):', pm.environment.get('scheduleStart'), '->', pm.environment.get('scheduleEnd'));",
+                  "console.log('That is', start.toLocaleString(), '->', end.toLocaleString(), 'in your local time.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List queues (paged, filtered)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue?storeId={{storeId}}&pageNumber=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "storeId",
+                  "value": "{{storeId}}"
+                },
+                {
+                  "key": "pageNumber",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "deviceId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "locationType",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "isActive",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Paged list with filters. `status` accepts the queue status names - `Pending`, `Processing`, `Completed`, `Failed`."
+          }
+        },
+        {
+          "name": "Get queue by id (with execution history)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/{{lastQueueId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "{{lastQueueId}}"
+              ]
+            },
+            "description": "One queue, including what happened when it ran.\n\nEvery attempt writes a `QueueExecutionLog` row, pass or fail. When a label did not change, this is where the reason is: `errorMessage` carries Minew's own rejection text, and `bindingData` holds the raw cloud response.\n\nA rejected bind is recorded as **Failed**, not silently completed - the code checks Minew's response body rather than trusting the HTTP status."
+          }
+        },
+        {
+          "name": "Upcoming queues (next 24h)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/upcoming?hours=24",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "upcoming"
+              ],
+              "query": [
+                {
+                  "key": "hours",
+                  "value": "24"
+                }
+              ]
+            },
+            "description": "What is about to run. The best single check that a schedule was accepted and is armed.\n\nReturns the queue with its resolved `locationName` / `productName`, so you can confirm the right product is attached without a second lookup."
+          }
+        },
+        {
+          "name": "Active queues",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "active"
+              ]
+            },
+            "description": "Queues currently in their display window."
+          }
+        },
+        {
+          "name": "Queues for a device",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/device/10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "device",
+                "10"
+              ]
+            },
+            "description": "Everything scheduled against one label - useful when a label is showing something unexpected."
+          }
+        },
+        {
+          "name": "Reschedule a queue",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/{{lastQueueId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "{{lastQueueId}}"
+              ]
+            },
+            "description": "Moves the window or changes recurrence. Only the fields you send are applied - all of them are optional except `userId`.\n\nTimes are UTC, same as on create.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"{{scheduleStart}}\",\n  \"endDate\": \"{{scheduleEnd}}\",\n  \"priorityId\": 2,\n  \"isActive\": true,\n  \"isRecurring\": false,\n  \"recurrencePattern\": null,\n  \"userId\": 42\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The scheduler compares against DateTime.UtcNow, so startDate/endDate must be UTC.",
+                  "// Sri Lanka is UTC+5:30 - a local 3:00pm promo is 09:30 UTC.",
+                  "// These build a window starting 2 minutes from now so the sample fires while you watch.",
+                  "const now = new Date();",
+                  "const start = new Date(now.getTime() + 2 * 60 * 1000);",
+                  "const end   = new Date(now.getTime() + 60 * 60 * 1000);",
+                  "pm.environment.set('scheduleStart', start.toISOString().slice(0, 19));",
+                  "pm.environment.set('scheduleEnd',   end.toISOString().slice(0, 19));",
+                  "console.log('Scheduled window (UTC):', pm.environment.get('scheduleStart'), '->', pm.environment.get('scheduleEnd'));",
+                  "console.log('That is', start.toLocaleString(), '->', end.toLocaleString(), 'in your local time.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Run a queue now",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/{{lastQueueId}}/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "{{lastQueueId}}",
+                "activate"
+              ]
+            },
+            "description": "Fires the queue immediately instead of waiting for its start time - the fastest way to prove the whole chain works during a demo.\n\nThis performs the **real cloud bind**, so the physical label repaints.\n\nReturns **400** if the start time has not arrived, and **409** if the queue has already run - most often because the background processor picked it up first. Neither changes the queue's recorded outcome."
+          }
+        },
+        {
+          "name": "Stop a queue",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/{{lastQueueId}}/deactivate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "{{lastQueueId}}",
+                "deactivate"
+              ]
+            },
+            "description": "Retires a running queue. It stays `Completed` rather than reverting to `Pending`, so the history stays truthful, and `isActive` is cleared so it no longer drives the label - which also makes it deletable."
+          }
+        },
+        {
+          "name": "Delete a queue",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/{{lastQueueId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "{{lastQueueId}}"
+              ]
+            },
+            "description": "Removes the schedule.\n\nReturns **409** if the queue is still inside its display window and has not been deactivated - deactivate it first, then delete. A queue that has already finished, or been deactivated, deletes straight away."
+          }
+        },
+        {
+          "name": "Queue statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/stats?storeId={{storeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "stats"
+              ],
+              "query": [
+                {
+                  "key": "storeId",
+                  "value": "{{storeId}}"
+                }
+              ]
+            },
+            "description": "Counts by status for a store - pending, completed, failed."
+          }
+        },
+        {
+          "name": "Priority types",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/queue/prioritytypes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "queue",
+                "prioritytypes"
+              ]
+            },
+            "description": "The `priorityId` values:\n\n| Id | Code | Use for |\n|---|---|---|\n| 1 | `EMERGENCY` | Price errors, out-of-stock |\n| 2 | `PRICE_CHANGE` | Price updates and corrections |\n| 3 | `PROMOTION` | Promotional content |\n| 4 | `SCHEDULED` | Routine rotation (the default) |\n| 5 | `MAINTENANCE` | Device health checks |"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Devices",
+      "item": [
+        {
+          "name": "Get device by MAC (with bindings)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Found', () => pm.expect(body.success).to.be.true);",
+                  "pm.test('Bindings present', () => pm.expect(body.result).to.have.property('bindings'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/device/by-mac/e0000000be65?storeId={{storeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "device",
+                "device",
+                "by-mac",
+                "e0000000be65"
+              ],
+              "query": [
+                {
+                  "key": "storeId",
+                  "value": "{{storeId}}",
+                  "description": "Optional - only needed if the same MAC is registered in more than one store"
+                }
+              ]
+            },
+            "description": "**Whole device record for a MAC, including everything it is currently bound to.**\n\nThe MAC may be given bare (`e0000000be65`) or separated (`e0:00:00:00:be:65` / `e0-00-00-00-be-65`) - both match the same device, and case does not matter.\n\n`storeId` is optional; supply it only to disambiguate a MAC registered in more than one store.\n\nResponse highlights:\n- hardware state: `battery`, `isOnline`, `lastSeen`, `firmware`, screen size and colour\n- `minewDeviceId` and `minewStoreId` - the cloud-side identifiers\n- `isBound` / `bindings[]` - what the label is showing: `productCode`, `productName`, `sellingPrice`, `discountPrice`, `templateName`, `messageName`\n\nReturns 404 when no device carries that MAC."
+          }
+        },
+        {
+          "name": "Get device by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/device/10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "device",
+                "device",
+                "10"
+              ]
+            },
+            "description": "Device record by internal id. Returns the device fields only - use **by MAC** for the version that includes bindings."
+          }
+        },
+        {
+          "name": "Re-bind a label",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comboId\": 1,\n  \"productId\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/device/bind",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "device",
+                "bind"
+              ]
+            },
+            "description": "Forces a label to re-render a product it is already assigned to.\n\nYou should not normally need this - creating or updating a product with ESL assignments binds the label automatically. Use it to repaint a label that was offline at bind time, or after changing a template outside the product flow.\n\n`comboId` is the `deviceTemplateComboId` from **Get product by code**; `productId` is the product to render.\n\nRoles: Admin or Manager only."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -42,6 +42,10 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
         // =========================
         #region Login
 
+        /// <summary>
+        /// Authenticates against the Minew cloud and caches the token used by every other
+        /// Minew call. Credentials come from configuration, not this request.
+        /// </summary>
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] MinewLoginRequest request)
         {
@@ -117,6 +121,9 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
             return Ok(result);
         }
 
+        /// <summary>
+        /// Renames or updates a store in the Minew cloud.
+        /// </summary>
         [HttpPut("store/update")]
         public async Task<IActionResult> UpdateStore([FromBody] MinewUpdateStoreRequest request)
         {
@@ -124,6 +131,10 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
             return Ok(result);
         }
 
+        /// <summary>
+        /// Opens or closes a Minew store. active=1 opens, 0 closes. A closed store stops
+        /// accepting binds and price pushes.
+        /// </summary>
         [HttpGet("store/openOrClose")]
         public async Task<IActionResult> OpenOrClose([FromQuery] string storeId, [FromQuery] int active)
         {
@@ -207,6 +218,10 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
             return Content(json, "application/json");
         }
 
+        /// <summary>
+        /// Pushes the store's shelves to the Minew cloud as goods records so shelf-level
+        /// labels have something to bind to.
+        /// </summary>
         [HttpPost("shelf/syncToCloud")]
         public async Task<IActionResult> SyncShelfToCloud([FromQuery] long storeId, [FromQuery] string? opcode)
         {
@@ -257,6 +272,11 @@ namespace TERMS_LOYALTY_API.Controllers.Shelf
             }
         }
 
+        /// <summary>
+        /// Pushes every product not yet synced to the Minew cloud goods store, then marks
+        /// them synced. Products must exist in the cloud before a label can bind to them -
+        /// binding an unsynced product fails with 数据不存在.
+        /// </summary>
         [HttpPost("syncToCloud")]
         public async Task<IActionResult> SyncProductsToCloud([FromQuery] long storeId, [FromQuery] string? opcode)
         {

@@ -19,6 +19,9 @@ namespace TERMS_LOYALTY_API.Interface
         Task<(bool success, string message)> DeleteDeviceAsync(long id, int userId);
         Task<List<DeviceDto>> GetDevicesByIdsAsync(List<long> ids);
 
+        // External integration: full device record + current bindings, keyed by MAC
+        Task<DeviceDetailDto> GetDeviceDetailByMacAsync(string mac, long? storeId);
+
         //Esl Brand
         Task<List<EslBrandDto>> GetActiveBrandsAsync();
 

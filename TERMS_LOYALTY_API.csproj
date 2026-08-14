@@ -7,6 +7,13 @@
     <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
     <PublishSingleFile>false</PublishSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
+
+    <!-- Swagger reads these XML comments to describe each endpoint. Without the
+         file, every <summary> in the codebase is invisible in the UI. 1591 is
+         "missing XML comment on a public member" - warning on it would add
+         thousands of entries for DTO properties that need no prose. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,7 +21,6 @@
     <PackageReference Include="EFCore.BulkExtensions" Version="5.0.7" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="5.0.1" NoWarn="NU1605" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="5.0.1" NoWarn="NU1605" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Common" Version="5.0.17" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="5.0.17" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="5.0.17">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

@@ -175,6 +175,9 @@ namespace TERMS_LOYALTY_API.Controllers
         }
 
         // POST: api/aisle
+        /// <summary>
+        /// Creates an aisle.
+        /// </summary>
         [Authorize(Roles = "Admin,Manager,Operator")]
         [HttpPost]
         public async Task<ActionResult<AisleMaster>> Add([FromBody] AisleMaster aisle)

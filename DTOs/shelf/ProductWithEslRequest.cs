@@ -7,6 +7,11 @@ namespace TERMS_LOYALTY_API.DTOs.shelf
         public ProductEslData Product { get; set; }
         public List<EslAssignmentIntent> EslAssignments { get; set; } = new();
         public int UserId { get; set; }
+
+        /// <summary>Push the binding to the vendor cloud so the physical label
+        /// actually starts showing the product. Default on - set false to record
+        /// the assignment locally only.</summary>
+        public bool BindToEsl { get; set; } = true;
     }
 
     public class ProductEslData
